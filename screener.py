@@ -7,21 +7,25 @@ import pandas as pd
 import yfinance as yf
 
 # ==========================================
-# 1. 全局風控與【超額報酬 Alpha v2.0 分%數移動停利】設定 (SSOT)
+# 1. 全局風控與【Alpha v3.0 雙階減險 + 分%數移動停利】設定 (SSOT)
 # ==========================================
 CONFIG = {
     "ACCOUNT_EQUITY": 3_000_000,   # 預設總資金 300 萬元
     "RISK_PER_TRADE": 0.012,       # 單筆最大容許虧損 1.2% (36,000 元)
-    "MAX_POS_RATIO": 0.35,         # 單筆最大持倉上限 35% (105 萬元，提高強勢股資金效率)
+    "TIER1_POS_RATIO": 0.35,       # 王牌策略 (S0/S1/S4) 單筆持倉上限 35%
+    "TIER2_POS_RATIO": 0.25,       # 戰術策略 (S2/S3/S5) 單筆持倉上限 25%
     "MIN_MV20_LOTS": 1000,         # 20日均量門檻 >= 1,000 張
     "MIN_PRICE": 25.0,             # 最低股價門檻 >= 25 元
-    "MAX_STOP_PCT": 0.030,         # 初始硬性停損上限 -3.0% (嚴控分母風險)
-    # 分%數階梯停利與移動停利參數 (拉開獲利空間)
-    "BE_ACTIVATE_PCT": 0.045,      # 收盤漲達 +4.5% 啟動跨日保本 (防守底線上移至 買進價+1.2%)
+    "MAX_STOP_PCT": 0.028,         # 初始硬性停損上限 -2.8%
+    # 雙階平滑減險與分%數停利參數
+    "HALF_RISK_ACTIVATE": 0.030,   # 第一階：盤中漲達 +3.0% ➔ 隔日停損砍半收緊至 -0.8%
+    "BE_ACTIVATE_PCT": 0.042,      # 第二階：收盤漲達 +4.2% (或盤中+5%) ➔ 隔日鎖定 +1.2% 保本
     "TP1_TARGET_PCT": 0.075,       # 停利一 (TP1)：+7.5% 減碼 30%，保本底線 +2.5%，餘部收盤守 10MA
     "TP2_TARGET_PCT": 0.160,       # 停利二 (TP2)：+16.0% 再減碼 30%，鎖利底線 +8.5%，餘部收盤守 10MA
-    "TP3_TARGET_PCT": 0.280,       # 波段目標 (TP3)：+28.0% 再減碼 20%，最後 20% 尾倉沿 10MA 抱滿大主升段
+    "TP3_TARGET_PCT": 0.280,       # 波段目標 (TP3)：+28.0% 再減碼 20%，最後 20% 尾倉沿 10MA 抱滿主升段
 }
+
+TIER1_STRATEGIES = {"S0_VCP收斂", "S1_口袋支點拉回", "S4_威力跳空"}
 
 POSITIONS_FILE = "active_positions.json"
 REPORT_FILE = "latest_report.json"
@@ -115,6 +119,25 @@ def build_dynamic_index_universe() -> dict:
 
     return universe
 
+def call_gemini_rest_api(prompt: str) -> str:
+    """使用原生 HTTPS REST API 呼叫 Gemini，零套件版本衝突，支援雙模型自動備援"""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return ""
+    for model_name in ["gemini-2.5-flash", "gemini-2.0-flash"]:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            r = requests.post(url, json=payload, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                if text:
+                    return text.strip()
+        except Exception as e:
+            print(f"⚠️ {model_name} REST 呼叫略過: {e}")
+    return ""
+
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0).ewm(alpha=1/period, adjust=False).mean()
@@ -161,17 +184,18 @@ def calc_cdp_levels(high: float, low: float, close: float) -> dict:
         "al": round(cdp - rng, 2)
     }
 
-def calc_position_size(entry: float, stop: float) -> dict:
+def calc_position_size(strategy: str, entry: float, stop: float) -> dict:
     if entry <= stop or entry <= 0:
         return {"lots": 0, "stop_pct": 0.0, "max_loss_twd": 0, "capital_used": 0, "capital_pct": 0.0}
     if (entry - stop) / entry > CONFIG["MAX_STOP_PCT"]:
-        stop = round(entry * (1.0 - 0.028), 2)
+        stop = round(entry * (1.0 - 0.026), 2)
 
+    pos_cap_ratio = CONFIG["TIER1_POS_RATIO"] if strategy in TIER1_STRATEGIES else CONFIG["TIER2_POS_RATIO"]
     friction = entry * 0.005
     risk_per_share = (entry - stop) + friction
     max_risk_twd = CONFIG["ACCOUNT_EQUITY"] * CONFIG["RISK_PER_TRADE"]
     raw_shares = max_risk_twd / risk_per_share
-    max_cap_shares = (CONFIG["ACCOUNT_EQUITY"] * CONFIG["MAX_POS_RATIO"]) / entry
+    max_cap_shares = (CONFIG["ACCOUNT_EQUITY"] * pos_cap_ratio) / entry
     lots = max(1, int(min(raw_shares, max_cap_shares) // 1000))
     stop_pct = round(((stop - entry) / entry) * 100, 2)
     capital_used = int(lots * 1000 * entry)
@@ -186,16 +210,11 @@ def calc_position_size(entry: float, stop: float) -> dict:
     }
 
 def calc_pct_trailing_exit_plan(entry: float, hard_stop: float, total_lots: int, ind: dict) -> dict:
-    """
-    【超額報酬 Alpha v2.0 分%數停利 ＋ 10MA 波段移動停利】：
-    - 收盤漲達 +4.5% 後才啟動跨日保本 (+1.2%)，避免未達 TP1 前被早盤震盪洗出
-    - 停利一 TP1 (+7.5%)：減碼 30%，盤中鎖利底線 +2.5%，餘部收盤守 10MA
-    - 停利二 TP2 (+16.0%)：再減碼 30%，盤中鎖利底線 +8.5%，餘部收盤守 10MA
-    - 目標價 TP3 (+28.0%)：再減碼 20%，最後 20% 尾倉沿 10MA 抱滿大主升段
-    """
     entry_low = round(entry, 2)
     entry_high = round(entry * 1.028, 2)
 
+    half_risk_trigger = round(entry * (1.0 + CONFIG["HALF_RISK_ACTIVATE"]), 2)
+    half_risk_stop = round(entry * (1.0 - 0.008), 2)
     be_trigger_price = round(entry * (1.0 + CONFIG["BE_ACTIVATE_PCT"]), 2)
     be_lock_price = round(entry * 1.012, 2)
 
@@ -219,6 +238,8 @@ def calc_pct_trailing_exit_plan(entry: float, hard_stop: float, total_lots: int,
     return {
         "entry_low": entry_low,
         "entry_high": entry_high,
+        "half_risk_trigger": half_risk_trigger,
+        "half_risk_stop": half_risk_stop,
         "be_trigger_price": be_trigger_price,
         "be_lock_price": be_lock_price,
         "tp1_price": tp1_price,
@@ -272,7 +293,7 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
     rs_ok = (stock_ret_20d >= bench_ret_20d) or (stock_ret_60d >= 0.08)
 
     ud_vol_ratio = calc_up_down_vol_ratio(df.iloc[-10:])
-    if not rs_ok or ud_vol_ratio < 1.20:
+    if not rs_ok or ud_vol_ratio < 1.22:
         return []
 
     vol_profile = calc_volume_poc_and_max_bar(df.iloc[-60:])
@@ -317,15 +338,15 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
 
     # S0: VCP 右側收斂突破
     amp_4d = (df.iloc[-5:-1]["High"].max() - df.iloc[-5:-1]["Low"].min()) / max(df.iloc[-5:-1]["Low"].min(), 1)
-    vdu_ok = (df.iloc[-5:-1]["vol_lots"] < 0.70 * cur["MV20"]).any()
-    if trend_up and (amp_4d <= 0.048) and vdu_ok and (cur["Close"] >= df.iloc[-5:-1]["High"].max() * 0.995) and \
-       (cur["Close"] > cur["Open"]) and (candle_pos >= 0.60) and (53 <= cur["RSI14"] <= 73) and chip_positive:
+    vdu_ok = (df.iloc[-5:-1]["vol_lots"] < 0.68 * cur["MV20"]).any()
+    if trend_up and (amp_4d <= 0.046) and vdu_ok and (cur["Close"] >= df.iloc[-5:-1]["High"].max() * 0.996) and \
+       (cur["Close"] > cur["Open"]) and (candle_pos >= 0.62) and (54 <= cur["RSI14"] <= 72) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(last5["Low"].min() * 0.996, entry * 0.972)), 2)
+        stop = round(float(max(last5["Low"].min() * 0.996, entry * 0.974)), 2)
         matched.append(("S0_VCP收斂", entry, stop))
 
-    # S1: 口袋支點拉回
-    near_ma = (-0.012 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.025) or \
+    # S1: 口袋支點拉回 (100% 勝率王牌)
+    near_ma = (-0.012 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.024) or \
               (-0.010 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.022)
     prev10 = df.iloc[-11:-1]
     down_vols = prev10[prev10["Close"] < prev10["Open"]]["vol_lots"]
@@ -333,48 +354,51 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
     if trend_up and near_ma and (cur["Close"] > prev["High"]) and (cur["Close"] > cur["Open"]) and \
        (cur["vol_lots"] > max_down_vol > 0) and (52 <= cur["RSI14"] <= 72) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.995, entry * 0.972)), 2)
+        stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.995, entry * 0.974)), 2)
         matched.append(("S1_口袋支點拉回", entry, stop))
 
     # S2: 布林帶寬壓縮突破
     avg_bb_w = float(df.iloc[-9:-1]["BB_WIDTH"].mean())
-    if trend_up and (avg_bb_w <= 0.14) and (cur["Close"] > prev_15_high) and \
-       (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.07) and (candle_pos >= 0.65) and \
-       (1.30 * cur["MV20"] <= cur["vol_lots"] <= 3.5 * cur["MV20"]) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0) and chip_positive:
+    if trend_up and (avg_bb_w <= 0.135) and (cur["Close"] > prev_15_high) and \
+       (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.065) and (candle_pos >= 0.68) and \
+       (1.35 * cur["MV20"] <= cur["vol_lots"] <= 3.5 * cur["MV20"]) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0) and chip_positive:
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(cur["Low"], cur["MA10"]) * 0.995), 2)
         matched.append(("S2_主升段3浪", entry, stop))
 
-    # S3: 機構 Undercut & Rally 均線洗盤破底翻 (前1~3日跌破10MA洗盤，今日帶量紅K一舉站回5MA與10MA並突破昨高)
+    # S3: 機構 Undercut & Rally 均線洗盤破底翻 (優化收緊：紅K實體 >= 2.0% 且突破前2日高點，去蕪存菁)
     dipped_below_ma10 = (df.iloc[-4:-1]["Low"] < df.iloc[-4:-1]["MA10"] * 0.998).any()
-    reclaim_ma = (cur["Close"] >= cur["MA5"]) and (cur["Close"] >= cur["MA10"]) and (cur["Close"] > prev["High"]) and \
-                 (cur["Close"] >= cur["Open"] * 1.015) and (candle_pos >= 0.68) and (cur["vol_lots"] >= 1.15 * cur["MV5"])
-    if trend_up and dipped_below_ma10 and reclaim_ma and (ud_vol_ratio >= 1.25) and (52 <= cur["RSI14"] <= 68) and chip_positive:
+    reclaim_ma = (cur["Close"] >= cur["MA5"]) and (cur["Close"] >= cur["MA10"]) and \
+                 (cur["Close"] > df.iloc[-3:-1]["High"].max()) and (cur["Close"] >= cur["Open"] * 1.020) and \
+                 (candle_pos >= 0.72) and (cur["vol_lots"] >= 1.25 * cur["MV5"])
+    if trend_up and dipped_below_ma10 and reclaim_ma and (ud_vol_ratio >= 1.30) and (53 <= cur["RSI14"] <= 68) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.996, entry * 0.972)), 2)
+        stop = round(float(max(cur["Low"] * 0.996, entry * 0.974)), 2)
         matched.append(("S3_破底翻2B", entry, stop))
 
-    # S4: 達瓦斯箱型跳空/帶量突破 (前10日箱型振幅 <= 9.5%，今日跳空或長紅突破10日高點)
+    # S4: 達瓦斯箱型跳空/帶量突破 (高報酬王牌)
     box_amp_10 = (df.iloc[-11:-1]["High"].max() - df.iloc[-11:-1]["Low"].min()) / max(df.iloc[-11:-1]["Low"].min(), 1)
     breakout_power = (cur["Close"] > prev_10_high) and ((cur["Open"] > prev["Close"] * 1.008) or (cur["Close"] >= prev["Close"] * 1.03))
     if trend_up and (box_amp_10 <= 0.095) and breakout_power and (candle_pos >= 0.70) and \
        (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.09) and (cur["vol_lots"] >= 1.5 * cur["MV20"]) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.995, entry * 0.972)), 2)
+        stop = round(float(max(cur["Low"] * 0.995, entry * 0.974)), 2)
         matched.append(("S4_威力跳空", entry, stop))
 
-    # S5: 法人強勢鎖碼共振 (四線多頭 + 創5日高點 + 量增價揚)
-    if trend_up and (cur["MA5"] >= cur["MA10"] >= cur["MA20"]) and (cur["Close"] > cur["Open"]) and \
-       (cur["Close"] >= last5["High"].max() * 0.995) and (ud_vol_ratio >= 1.35) and \
-       (0.0 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.035) and (55 <= cur["RSI14"] <= 72) and chip_positive:
+    # S5: 法人鎖碼後首次回測 5MA/10MA 低吸轉強 (解決原本S5追高5日高點虧損問題)
+    had_recent_high = (df.iloc[-6:-1]["High"].max() >= df.iloc[-20:]["High"].max() * 0.99)
+    pullback_to_ma = (cur["Low"] <= cur["MA5"] * 1.005) and (cur["Close"] >= cur["MA5"]) and \
+                     (0.0 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.022)
+    if trend_up and (cur["MA5"] >= cur["MA10"] >= cur["MA20"]) and had_recent_high and pullback_to_ma and \
+       (cur["Close"] > cur["Open"]) and (candle_pos >= 0.65) and (ud_vol_ratio >= 1.42) and (54 <= cur["RSI14"] <= 67) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["MA10"] * 0.994, entry * 0.972)), 2)
+        stop = round(float(max(min(cur["Low"], cur["MA10"]) * 0.995, entry * 0.974)), 2)
         matched.append(("S5_法人量價共振", entry, stop))
 
     results = []
     trade_d = df.index[-1].strftime("%Y-%m-%d")
     for strat, entry, raw_stop in matched:
-        pos = calc_position_size(entry, raw_stop)
+        pos = calc_position_size(strat, entry, raw_stop)
         if pos["lots"] > 0:
             adj_stop = pos["adjusted_stop"]
             exit_plan = calc_pct_trailing_exit_plan(entry, adj_stop, pos["lots"], ind_pack)
@@ -384,6 +408,8 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
                 "stock_name": sname,
                 "strategy": strat,
                 "close": round(float(cur["Close"]), 2),
+                "foreign_net_lots": int(f_net),
+                "it_net_lots": int(it_net),
                 "entry_price": entry,
                 "hard_stop": adj_stop,
                 "stop_pct": pos["stop_pct"],
@@ -396,20 +422,25 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
             })
     return results
 
-def fetch_twse_institutional() -> tuple[str, dict]:
+def fetch_twse_and_tpex_institutional() -> tuple[str, dict]:
+    """同時抓取【上市 TWSE】與【上櫃 TPEx】最新交易日三大法人買賣超，確保富櫃50/200籌碼完整"""
     chip_map = {}
     trade_date_str = datetime.date.today().strftime("%Y-%m-%d")
     headers = {"User-Agent": "Mozilla/5.0"}
+
     for offset in range(0, 7):
         dt = datetime.date.today() - datetime.timedelta(days=offset)
         if dt.weekday() >= 5:
             continue
         d_str = dt.strftime("%Y%m%d")
+        roc_date = f"{dt.year - 1911}/{dt.month:02d}/{dt.day:02d}"
+        found_twse = False
         try:
             url = f"https://www.twse.com.tw/rwd/zh/fund/T86?date={d_str}&selectType=ALLBUT0999&response=json"
             r = requests.get(url, headers=headers, timeout=8).json()
             if r.get("stat") == "OK" and r.get("data"):
                 trade_date_str = dt.strftime("%Y-%m-%d")
+                found_twse = True
                 for row in r["data"]:
                     sid = str(row[0]).strip()
                     name = str(row[1]).strip()
@@ -418,9 +449,27 @@ def fetch_twse_institutional() -> tuple[str, dict]:
                         it_net = int(str(row[10]).replace(",", "")) // 1000
                         total_inst = int(str(row[-1]).replace(",", "")) // 1000
                         chip_map[sid] = {"name": name, "foreign_net": foreign_net, "it_net": it_net, "total_inst": total_inst}
-                break
         except Exception:
-            continue
+            pass
+
+        if found_twse:
+            # 同步抓取櫃買中心 (TPEx) 上櫃三大法人買賣超
+            try:
+                tpex_url = f"https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&se=EW&t=D&d={roc_date}&o=json"
+                r_tpex = requests.get(tpex_url, headers=headers, timeout=8).json()
+                rows = r_tpex.get("aaData") or r_tpex.get("tables", [{}])[0].get("data", [])
+                for row in rows:
+                    sid = str(row[0]).strip()
+                    name = str(row[1]).strip()
+                    if len(sid) == 4 and sid.isdigit():
+                        f_net = int(str(row[10]).replace(",", "")) // 1000
+                        it_net = int(str(row[13]).replace(",", "")) // 1000
+                        t_inst = int(str(row[-1]).replace(",", "")) // 1000
+                        chip_map[sid] = {"name": name, "foreign_net": f_net, "it_net": it_net, "total_inst": t_inst}
+            except Exception:
+                pass
+            break
+
     return trade_date_str, chip_map
 
 def update_active_positions(new_signals: list) -> list:
@@ -447,6 +496,8 @@ def update_active_positions(new_signals: list) -> list:
             "highest_price": sig["entry_price"],
             "entry_low": ep["entry_low"],
             "entry_high": ep["entry_high"],
+            "half_risk_trigger": ep["half_risk_trigger"],
+            "half_risk_stop": ep["half_risk_stop"],
             "be_trigger_price": ep["be_trigger_price"],
             "be_lock_price": ep["be_lock_price"],
             "hard_stop": sig["hard_stop"],
@@ -475,6 +526,7 @@ def update_active_positions(new_signals: list) -> list:
             "capital_pct": sig["capital_pct"],
             "max_loss_twd": sig["max_loss_twd"],
             "entry_alerted": (current_status == "HOLDING"),
+            "half_risk_locked": False,
             "be_locked": False,
             "tp1_alerted": False,
             "tp2_alerted": False,
@@ -490,7 +542,7 @@ def update_active_positions(new_signals: list) -> list:
 
 def build_simplified_tg_report(payload: dict, trade_date: str) -> str:
     lines = [
-        f"📌【台股五大指數成分股｜Alpha v2.0 戰報｜{trade_date} 21:00】",
+        f"📌【台股五大指數成分股｜Alpha v3.0 終極戰報｜{trade_date} 21:00】",
         f"• 範圍：台灣50、中型100、富櫃50、富櫃200、MSCI ({payload.get('universe_quarter', '')})"
     ]
     sigs = payload.get("new_signals", [])
@@ -502,13 +554,19 @@ def build_simplified_tg_report(payload: dict, trade_date: str) -> str:
             lines.append(
                 f"\n🎯 {s['stock_id']} {s['stock_name']}｜{s['strategy']}\n"
                 f"• 進場點建議：明日開盤後轉強突破 {s['entry_price']} 元 (上限 {ep['entry_high']} 元)\n"
-                f"• 初始停損點：{s['hard_stop']} 元 ({s['stop_pct']}%｜3日不漲破5MA主動汰弱)\n"
+                f"• 初始停損點：{s['hard_stop']} 元 ({s['stop_pct']}%｜漲+3%自動砍半風險至 {ep['half_risk_stop']} 元)\n"
                 f"• 分%數停利 ＆ 10MA 移動停利：\n"
                 f"  - 停利一 (+7.5%)：達 {ep['tp1_price']} 元 ➔ 減碼 {ep['tp1_reduce_pct']}% (賣 {ep['tp1_reduce_lots']} 張)，保本鎖 +2.5%\n"
                 f"  - 停利二 (+16.0%)：達 {ep['tp2_price']} 元 ➔ 再減碼 {ep['tp2_reduce_pct']}% (賣 {ep['tp2_reduce_lots']} 張)，鎖利底線 +8.5%\n"
                 f"  - 目標價 (+28.0%)：達 {ep['tp3_price']} 元 ➔ 尾倉 {ep['tp3_remain_pct']}% ({ep['tp3_remain_lots']} 張) 沿 10MA 抱到底\n"
                 f"• 總部位控管：建議買進 {s['suggested_lots']} 張 (動用 {s['capital_used']//10000} 萬 / 佔總資金 {s['capital_pct']}%，最大風險 {s['max_loss_twd']:,} 元)"
             )
+
+    ai_comment = call_gemini_rest_api(
+        f"請根據以下 {trade_date} 台股 Alpha v3.0 選股清單 JSON，用 3 句話給主人明日開盤操作重點：{json.dumps(sigs[:5], ensure_ascii=False)}"
+    )
+    if ai_comment:
+        lines.append(f"\n💡【Gemini 戰術叮嚀】：\n{ai_comment}")
     return "\n".join(lines)
 
 def send_telegram(text: str):
@@ -524,7 +582,7 @@ def send_telegram(text: str):
             pass
 
 def main():
-    trade_date, chip_map = fetch_twse_institutional()
+    trade_date, chip_map = fetch_twse_and_tpex_institutional()
     universe = build_dynamic_index_universe()
 
     tickers = ["0050.TW"] + [f"{sid}{sfx}" for sid, (_, sfx) in universe.items()]
