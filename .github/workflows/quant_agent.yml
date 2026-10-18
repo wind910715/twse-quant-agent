@@ -2,30 +2,35 @@ name: TWSE Quant Agent (21:00 Screener + Intraday Monitor)
 
 on:
   schedule:
-    # 任務 A：台灣時間週一至週五 晚間 21:00 (UTC 13:00) 執行盤後四因子選股
+    # 台灣時間週一至週五 晚間 21:00 (UTC 13:00) 執行盤後四因子選股
     - cron: '0 13 * * 1-5'
-    # 任務 B：台灣時間週一至週五 盤中 09:00~13:35 (UTC 01:00~05:35) 每 5 分鐘啟動即時監控
+    # 台灣時間週一至週五 盤中 09:00~13:35 (UTC 01:00~05:35) 每 5 分鐘啟動即時監控
     - cron: '*/5 1-5 * * 1-5'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+env:
+  # 消除 Node.js 20 棄用警告，平滑相容 Node.js 24
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   quant-task:
-    runs-on: ubuntu-latest
+    # 鎖定穩定版 ubuntu-24.04，避免 2026/10/19 Ubuntu 26 升級造成套件崩潰
+    runs-on: ubuntu-24.04
     steps:
       - name: 1. 檢出倉庫程式碼與持倉狀態
         uses: actions/checkout@v4
 
-      - name: 2. 安裝 Python 與套件
+      - name: 2. 安裝 Python 3.11 與量化套件
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      - run: pip install -r requirements.txt
+      - run: pip install --upgrade pip && pip install -r requirements.txt
 
-      - name: 3. 判斷時段執行「盤中即時停損停利監控」或「21:00 盤後選股」
+      - name: 3. 執行選股或盤中停損停利即時巡邏
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -34,10 +39,10 @@ jobs:
         run: |
           HOUR_UTC=$(date -u +%H)
           if [ "$HOUR_UTC" -ge 12 ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "執行晚間 21:00 盤後四因子選股..."
+            echo "🚀 啟動盤後四因子選股引擎 (screener.py)..."
             python screener.py
           else
-            echo "執行盤中 09:00-13:35 停損停利即時巡邏..."
+            echo "🛡️ 啟動盤中停損停利即時監控 (monitor.py)..."
             python monitor.py
           fi
 
@@ -45,5 +50,12 @@ jobs:
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
+          touch latest_report.json active_positions.json
           git add latest_report.json active_positions.json || true
-          git diff --staged --quiet || (git commit -m "Sync state $(date +'%Y-%m-%d %H:%M')" && git push)
+          if ! git diff --staged --quiet; then
+            git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
+            git pull --rebase origin main || true
+            git push origin HEAD || true
+          else
+            echo "狀態無變更，無須重新推送。"
+          fi
