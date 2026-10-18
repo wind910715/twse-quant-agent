@@ -7,19 +7,21 @@ import pandas as pd
 import yfinance as yf
 
 # ==========================================
-# 1. 全局風控與高賺賠比參數 (Single Source of Truth)
+# 1. 全局風控與【分%數 + 移動停利】參數設定 (SSOT)
 # ==========================================
 CONFIG = {
     "ACCOUNT_EQUITY": 3_000_000,   # 預設總資金 300 萬元
     "RISK_PER_TRADE": 0.01,        # 單筆最大容許虧損 1% (30,000 元)
     "MAX_POS_RATIO": 0.25,         # 單筆最大持倉上限 25% (750,000 元)
-    "MIN_MV20_LOTS": 1200,         # 20日均量門檻 >= 1,200 張
+    "MIN_MV20_LOTS": 1000,         # 20日均量門檻 >= 1,000 張
     "MIN_PRICE": 25.0,             # 最低股價門檻 >= 25 元
-    "MAX_STOP_PCT": 0.038,         # 【寧缺勿濫鐵律】單筆初始停損幅度上限 3.8% (超過則放棄不進場)
+    "MAX_STOP_PCT": 0.048,         # 初始停損上限 4.8% (兼顧風控與突破K棒呼吸空間)
+    # 分%數階梯停利與移動停利參數
+    "BE_ACTIVATE_PCT": 0.032,      # 漲達 +3.2% 啟動保本移動停利 (防守上移至成本+0.8%)
+    "TP1_TARGET_PCT": 0.055,       # 停利一 (TP1)：+5.5% 減碼 30%，啟動最高價回落 3.0% 移動停利
+    "TP2_TARGET_PCT": 0.110,       # 停利二 (TP2)：+11.0% 再減碼 30%，啟動最高價回落 3.5% 移動停利
+    "TP3_TARGET_PCT": 0.180,       # 目標價 (TP3)：+18.0% 再減碼 20%，剩餘 20% 尾倉沿最高價回落 4.0%/10MA 抱到底
 }
-
-SMART_BROKERS = ["摩根大通", "台灣摩根士丹利", "美商高盛", "瑞士信貸", "瑞銀", "美林", "富邦-建國", "凱基-信義", "元大-城中"]
-DAY_TRADE_BROKERS = ["凱基-台北", "凱基-松山", "群益金鼎-大安", "富邦-嘉義", "元大-土城永寧", "富邦-虎尾"]
 
 POSITIONS_FILE = "active_positions.json"
 REPORT_FILE = "latest_report.json"
@@ -162,10 +164,9 @@ def calc_cdp_levels(high: float, low: float, close: float) -> dict:
 def calc_position_size(entry: float, stop: float) -> dict:
     if entry <= stop or entry <= 0:
         return {"lots": 0, "stop_pct": 0.0, "max_loss_twd": 0, "capital_used": 0, "capital_pct": 0.0}
-    stop_dist_ratio = (entry - stop) / entry
-    # 【寧缺勿濫鐵律】：若停損距離超過 3.8% 或小於 1.2%，代表風險結構不佳，直接不進場 (回傳 0 張)
-    if stop_dist_ratio > CONFIG["MAX_STOP_PCT"]:
-        return {"lots": 0, "stop_pct": 0.0, "max_loss_twd": 0, "capital_used": 0, "capital_pct": 0.0}
+    # 若結構停損超過 4.8%，自動收緊至 -4.5% 作為硬性停損上限
+    if (entry - stop) / entry > CONFIG["MAX_STOP_PCT"]:
+        stop = round(entry * (1.0 - 0.045), 2)
 
     friction = entry * 0.005
     risk_per_share = (entry - stop) + friction
@@ -178,57 +179,68 @@ def calc_position_size(entry: float, stop: float) -> dict:
     capital_pct = round((capital_used / CONFIG["ACCOUNT_EQUITY"]) * 100, 1)
     return {
         "lots": lots,
+        "adjusted_stop": stop,
         "stop_pct": stop_pct,
         "max_loss_twd": int(lots * 1000 * risk_per_share),
         "capital_used": capital_used,
         "capital_pct": capital_pct
     }
 
-def calc_multi_stage_exit_plan(strategy: str, entry: float, hard_stop: float, total_lots: int, ind: dict) -> dict:
+def calc_pct_trailing_exit_plan(entry: float, hard_stop: float, total_lots: int, ind: dict) -> dict:
     """
-    【高賺賠比三階段分批停利架構 (目標賺賠比 2.5:1 ~ 4.0:1)】：
-    - 保本觸發線 (+1.4R)：盤中突破此價位後，隔日硬性停損自動上移至成本+0.6%
-    - 停利一 TP1 (+2.2R)：先減碼 30% 落袋為安 (賺約 +6.5% ~ +8%)
-    - 目標價 TP2 (+4.0R)：再減碼 30% 鎖定主升段暴利 (賺約 +12% ~ +16%)
-    - 波段尾倉 (40%)：沿 10MA / 籌碼POC 動態防守，抱滿完整趨勢波段
+    【分 % 數停利 + 最高價回落移動停利 (Peak-Pullback Trailing Stop)】：
+    1. 啟動保本 (+3.2%)：觸及後移動停利上移至 買進價+0.8% (鎖定勝率)
+    2. 停利一 TP1 (+5.5%)：減碼 30% 張數，剩餘 70% 啟動「最高價回落 3.0%」動態移動停利
+    3. 停利二 TP2 (+11.0%)：再減碼 30% 張數，剩餘 40% 啟動「最高價回落 3.5% 或 10MA」移動停利
+    4. 波段目標 TP3 (+18.0%)：再減碼 20% 張數，最後 20% 尾倉沿「最高價回落 4.0% 或 10MA」抱到底
     """
-    risk_r = max(entry - hard_stop, entry * 0.02)
-    entry_low = round(max(hard_stop * 1.012, min(ind["ma5"], ind["cdp_nl"], entry * 0.99)), 2)
-    entry_high = round(entry * 1.012, 2)
+    entry_low = round(max(hard_stop * 1.012, min(ind["ma5"], ind["cdp_nl"], entry * 0.988)), 2)
+    entry_high = round(entry * 1.015, 2)
 
-    candidates_support = [ind["max_vol_low"], ind["bb_mid"], ind["cdp_al"], ind["ma10"]]
-    valid_sups = [s for s in candidates_support if hard_stop <= s < entry * 0.985]
-    raw_trailing = round(max(valid_sups), 2) if valid_sups else hard_stop
+    be_trigger_price = round(entry * (1.0 + CONFIG["BE_ACTIVATE_PCT"]), 2)
+    be_lock_price = round(entry * 1.008, 2)
 
-    tp1_price = round(entry + 2.2 * risk_r, 2)
-    tp2_price = round(max(entry + 4.0 * risk_r, tp1_price * 1.06), 2)
+    tp1_price = round(entry * (1.0 + CONFIG["TP1_TARGET_PCT"]), 2)
+    tp2_price = round(entry * (1.0 + CONFIG["TP2_TARGET_PCT"]), 2)
+    tp3_price = round(entry * (1.0 + CONFIG["TP3_TARGET_PCT"]), 2)
 
-    if total_lots >= 3:
+    if total_lots >= 4:
         tp1_lots = max(1, int(round(total_lots * 0.30)))
         tp2_lots = max(1, int(round(total_lots * 0.30)))
-        tp3_lots = total_lots - tp1_lots - tp2_lots
+        tp3_lots = max(1, int(round(total_lots * 0.20)))
+        tail_lots = max(0, total_lots - tp1_lots - tp2_lots - tp3_lots)
+    elif total_lots == 3:
+        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 1, 1, 0
     elif total_lots == 2:
-        tp1_lots, tp2_lots, tp3_lots = 1, 0, 1
+        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 1, 0, 0
     else:
-        tp1_lots, tp2_lots, tp3_lots = 0, 1, 0
+        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 0, 0, 0
 
     tp1_pct = int(round((tp1_lots / max(total_lots, 1)) * 100))
     tp2_pct = int(round((tp2_lots / max(total_lots, 1)) * 100))
-    tp3_pct = max(0, 100 - tp1_pct - tp2_pct)
+    tp3_pct = int(round(((tp3_lots + tail_lots) / max(total_lots, 1)) * 100))
 
     return {
         "entry_low": entry_low,
         "entry_high": entry_high,
-        "breakeven_trigger": round(entry + 1.4 * risk_r, 2),
+        "be_trigger_price": be_trigger_price,
+        "be_lock_price": be_lock_price,
         "tp1_price": tp1_price,
+        "tp1_pct_label": "+5.5%",
         "tp1_reduce_pct": tp1_pct,
         "tp1_reduce_lots": tp1_lots,
+        "tp1_trail_drawdown": 0.030,   # 最高價回落 3.0% 移動停利
         "tp2_price": tp2_price,
+        "tp2_pct_label": "+11.0%",
         "tp2_reduce_pct": tp2_pct,
         "tp2_reduce_lots": tp2_lots,
+        "tp2_trail_drawdown": 0.035,   # 最高價回落 3.5% 移動停利
+        "tp3_price": tp3_price,
+        "tp3_pct_label": "+18.0%",
         "tp3_remain_pct": tp3_pct,
-        "tp3_remain_lots": tp3_lots,
-        "dynamic_trailing_stop": raw_trailing
+        "tp3_remain_lots": tp3_lots + tail_lots,
+        "tp3_trail_drawdown": 0.040,   # 最高價回落 4.0% 移動停利
+        "dynamic_trailing_stop": hard_stop
     }
 
 def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, bench_ret_20d: float) -> list:
@@ -261,7 +273,7 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
         return []
 
     stock_ret_20d = (float(cur["Close"]) - float(df.iloc[-21]["Close"])) / max(float(df.iloc[-21]["Close"]), 1.0)
-    rs_strong = stock_ret_20d >= (bench_ret_20d + 0.015)
+    rs_outperform = stock_ret_20d >= bench_ret_20d
     ud_vol_ratio = calc_up_down_vol_ratio(df.iloc[-10:])
 
     vol_profile = calc_volume_poc_and_max_bar(df.iloc[-60:])
@@ -291,79 +303,79 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
     last3 = df.iloc[-3:]
     last5 = df.iloc[-5:]
     prev_15_high = df.iloc[-16:-1]["High"].max()
-    pre_amp_10d = (df.iloc[-11:-1]["High"].max() - df.iloc[-11:-1]["Low"].min()) / max(df.iloc[-11:-1]["Low"].min(), 1)
 
     f_net = chip_info.get("foreign_net", 0)
     it_net = chip_info.get("it_net", 0)
     inst_net = chip_info.get("total_inst", f_net + it_net)
-    chip_positive = (it_net > 0) or (f_net > 0) or (inst_net > 0)
+    chip_positive = (it_net > 0) or (f_net > 0) or (inst_net >= 0)
 
-    # 嚴格多頭排列：5MA >= 10MA >= 20MA > 60MA 且均線同步上揚
-    strict_trend_up = (cur["Close"] >= cur["MA5"] >= cur["MA10"] >= cur["MA20"] > cur["MA60"]) and \
-                      (cur["MA20"] > df.iloc[-5]["MA20"]) and (cur["MA60"] > df.iloc[-5]["MA60"])
+    trend_up = (cur["Close"] > cur["MA20"] > cur["MA60"]) and \
+               (cur["MA20"] > df.iloc[-5]["MA20"]) and (cur["MA60"] >= df.iloc[-5]["MA60"])
 
     matched = []
 
-    # S0: VCP 右側極度收斂 (波幅 <= 4.2% + 窒息量 + 緊貼 10MA 讓停損壓在 3% 內)
+    # S0: VCP 右側量縮收斂
     amp_5d = (last5["High"].max() - last5["Low"].min()) / max(last5["Low"].min(), 1)
-    vdu_3d = (last3["vol_lots"] < 0.55 * cur["MV20"]).any()
-    if strict_trend_up and rs_strong and ud_vol_ratio >= 1.35 and (cur["Close"] >= ind_pack["poc_price"]) and \
-       (amp_5d <= 0.042) and vdu_3d and (54 <= cur["RSI14"] <= 70) and chip_positive:
+    vdu_3d = (last3["vol_lots"] < 0.65 * cur["MV20"]).any()
+    if trend_up and rs_outperform and ud_vol_ratio >= 1.25 and (cur["Close"] >= cur["MA5"]) and \
+       (amp_5d <= 0.052) and vdu_3d and (52 <= cur["RSI14"] <= 72) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(last5["Low"].min() * 0.996, entry * 0.968)), 2)
+        stop = round(float(min(last5["Low"].min(), cur["MA20"]) * 0.994), 2)
         matched.append(("S0_VCP收斂", entry, stop))
 
-    # S1: 口袋支點拉回 (首次回測 10MA/20MA 量縮後帶量紅K點火，勝率與賺賠比王牌)
-    near_ma10 = (0.0 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.02)
+    # S1: 口袋支點拉回 (強勢股回測 10MA/20MA 出量紅K轉強)
+    near_ma = (-0.012 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.025) or \
+              (-0.010 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.022)
     prev10 = df.iloc[-11:-1]
     down_vols = prev10[prev10["Close"] < prev10["Open"]]["vol_lots"]
     max_down_vol = down_vols.max() if not down_vols.empty else 0
-    if strict_trend_up and rs_strong and ud_vol_ratio >= 1.40 and near_ma10 and \
-       (cur["Close"] > cur["Open"]) and (cur["vol_lots"] > max_down_vol > 0) and (55 <= cur["RSI14"] <= 72) and chip_positive:
+    if trend_up and rs_outperform and ud_vol_ratio >= 1.25 and near_ma and \
+       (cur["Close"] > cur["Open"]) and (cur["vol_lots"] > max_down_vol > 0) and (53 <= cur["RSI14"] <= 72) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(min(cur["Low"], cur["MA10"]) * 0.994, entry * 0.968)), 2)
+        stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.992, entry * 0.955)), 2)
         matched.append(("S1_口袋支點拉回", entry, stop))
 
-    # S2: 主升段第 3 浪突破 (前10日極窄整理 <= 8.5% 後首度帶量突破)
-    if strict_trend_up and rs_strong and ud_vol_ratio >= 1.40 and (pre_amp_10d <= 0.085) and \
-       (cur["Close"] > prev_15_high) and (1.5 * cur["MV20"] <= cur["vol_lots"] <= 2.8 * cur["MV20"]) and \
-       (60 <= cur["RSI14"] <= 73) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0) and chip_positive:
-        entry = round(float((cur["Close"] + prev_15_high) / 2.0), 2)
-        stop = round(float(max(cur["Low"], cur["MA10"]) * 0.994), 2)
+    # S2: 主升段第 3 浪突破 (帶量突破 15 日高點且 MACD 翻紅放大)
+    if trend_up and rs_outperform and ud_vol_ratio >= 1.25 and (cur["Close"] > prev_15_high) and \
+       (1.4 * cur["MV20"] <= cur["vol_lots"] <= 3.5 * cur["MV20"]) and (58 <= cur["RSI14"] <= 76) and \
+       (cur["MACD_HIST"] > prev["MACD_HIST"] > 0) and chip_positive:
+        entry = round(float(cur["Close"]), 2)
+        stop = round(float(max((cur["Open"] + cur["Close"]) / 2.0, cur["MA10"]) * 0.992), 2)
         matched.append(("S2_主升段3浪", entry, stop))
 
-    # S3: 威科夫破底翻 2B (嚴格限制：必須在 60MA 之上，假跌破後當日帶量紅K同時收復前低與 20MA)
-    sup_15 = df.iloc[-17:-2]["Low"].min()
+    # S3: 威科夫破底翻 2B (多頭架構下假跌破 10日低點後長紅K站回 10MA)
+    sup_12 = df.iloc[-14:-2]["Low"].min()
     low_2d = df.iloc[-3:-1]["Low"].min()
-    had_spring = (sup_15 * 0.97 <= low_2d < sup_15 * 0.998)
-    reclaim_strong = (cur["Close"] > sup_15) and (cur["Close"] > cur["MA20"]) and (cur["Close"] >= cur["MA5"]) and \
-                     (cur["Close"] > cur["Open"] * 1.012) and (cur["vol_lots"] >= 1.3 * cur["MV5"])
-    if rs_strong and (cur["Close"] > cur["MA60"]) and (cur["MA60"] > df.iloc[-10]["MA60"]) and had_spring and reclaim_strong and (ud_vol_ratio >= 1.25) and chip_positive:
+    had_spring = (sup_12 * 0.965 <= low_2d < sup_12 * 0.998)
+    reclaim_ok = (cur["Close"] > sup_12) and (cur["Close"] >= cur["MA10"]) and (cur["Close"] > cur["Open"] * 1.015) and (cur["vol_lots"] >= 1.2 * cur["MV5"])
+    if trend_up and had_spring and reclaim_ok and (ud_vol_ratio >= 1.20) and (50 <= cur["RSI14"] <= 68) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(low_2d * 0.996, entry * 0.966)), 2)
+        stop = round(float(max(low_2d * 0.994, entry * 0.955)), 2)
         matched.append(("S3_破底翻2B", entry, stop))
 
-    # S4: 威力跳空缺口 (底部或平台壓縮 <= 8.5% 後跳空突破 15 日高點)
+    # S4: 威力跳空缺口 (跳空突破且收在當日高檔)
     candle_pos = (cur["Close"] - cur["Low"]) / max(cur["High"] - cur["Low"], 0.01)
-    has_power_gap = (cur["Open"] > prev["Close"] * 1.02) and (cur["Low"] > prev["High"] * 1.004) and (cur["Close"] > prev_15_high)
-    if strict_trend_up and rs_strong and (pre_amp_10d <= 0.085) and has_power_gap and (candle_pos >= 0.70) and (cur["vol_lots"] >= 1.8 * cur["MV20"]) and chip_positive:
+    has_gap = (cur["Open"] > prev["Close"] * 1.015) and (cur["Low"] > prev["High"]) and (cur["Close"] >= prev_15_high * 0.99)
+    if trend_up and rs_outperform and has_gap and (candle_pos >= 0.65) and (cur["vol_lots"] >= 1.6 * cur["MV20"]) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.996, entry * 0.965)), 2)
+        stop = round(float(max(cur["Low"] * 0.994, entry * 0.955)), 2)
         matched.append(("S4_威力跳空", entry, stop))
 
-    # S5: 法人量價共振 (要求四線多頭 + 量價比 >= 1.50 + 緊貼 5MA/10MA 不超過 2.2%)
-    if strict_trend_up and (stock_ret_20d >= bench_ret_20d + 0.03) and (ud_vol_ratio >= 1.50) and \
-       (it_net > 0 and f_net >= 0) and (0 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.022) and (56 <= cur["RSI14"] <= 68):
+    # S5: 法人量價共振 (初升段起漲：20日漲幅介於 +2%~+14% 未過熱、量價比 >= 1.35 且站穩 5MA/10MA)
+    if trend_up and rs_outperform and (0.02 <= stock_ret_20d <= 0.14) and (ud_vol_ratio >= 1.35) and \
+       (cur["Close"] >= cur["MA5"] >= cur["MA10"]) and (0 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.03) and \
+       (cur["Close"] > cur["Open"]) and (54 <= cur["RSI14"] <= 68) and chip_positive:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["MA20"] * 0.995, entry * 0.968)), 2)
+        stop = round(float(max(cur["MA20"] * 0.994, entry * 0.96)), 2)
         matched.append(("S5_法人量價共振", entry, stop))
 
     results = []
     trade_d = df.index[-1].strftime("%Y-%m-%d")
-    for strat, entry, stop in matched:
-        pos = calc_position_size(entry, stop)
+    for strat, entry, raw_stop in matched:
+        pos = calc_position_size(entry, raw_stop)
         if pos["lots"] > 0:
-            exit_plan = calc_multi_stage_exit_plan(strat, entry, stop, pos["lots"], ind_pack)
+            adj_stop = pos["adjusted_stop"]
+            exit_plan = calc_pct_trailing_exit_plan(entry, adj_stop, pos["lots"], ind_pack)
             results.append({
                 "date": trade_d,
                 "stock_id": sid,
@@ -371,7 +383,7 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
                 "strategy": strat,
                 "close": round(float(cur["Close"]), 2),
                 "entry_price": entry,
-                "hard_stop": stop,
+                "hard_stop": adj_stop,
                 "stop_pct": pos["stop_pct"],
                 "suggested_lots": pos["lots"],
                 "capital_used": pos["capital_used"],
@@ -430,20 +442,26 @@ def update_active_positions(new_signals: list) -> list:
             "strategy": sig["strategy"],
             "entry_date": sig["date"],
             "entry_price": sig["entry_price"],
+            "highest_price": sig["entry_price"],
             "entry_low": ep["entry_low"],
             "entry_high": ep["entry_high"],
-            "breakeven_trigger": ep["breakeven_trigger"],
+            "be_trigger_price": ep["be_trigger_price"],
+            "be_lock_price": ep["be_lock_price"],
             "hard_stop": sig["hard_stop"],
             "stop_pct": sig["stop_pct"],
             "dynamic_trailing_stop": ep["dynamic_trailing_stop"],
             "tp1_price": ep["tp1_price"],
             "tp1_reduce_pct": ep["tp1_reduce_pct"],
             "tp1_reduce_lots": ep["tp1_reduce_lots"],
+            "tp1_trail_drawdown": ep["tp1_trail_drawdown"],
             "tp2_price": ep["tp2_price"],
             "tp2_reduce_pct": ep["tp2_reduce_pct"],
             "tp2_reduce_lots": ep["tp2_reduce_lots"],
+            "tp2_trail_drawdown": ep["tp2_trail_drawdown"],
+            "tp3_price": ep["tp3_price"],
             "tp3_remain_pct": ep["tp3_remain_pct"],
             "tp3_remain_lots": ep["tp3_remain_lots"],
+            "tp3_trail_drawdown": ep["tp3_trail_drawdown"],
             "poc_price": ind["poc_price"],
             "max_vol_low": ind["max_vol_low"],
             "cdp_al": ind["cdp_al"],
@@ -455,8 +473,10 @@ def update_active_positions(new_signals: list) -> list:
             "capital_pct": sig["capital_pct"],
             "max_loss_twd": sig["max_loss_twd"],
             "entry_alerted": (current_status == "HOLDING"),
+            "be_locked": False,
             "tp1_alerted": False,
             "tp2_alerted": False,
+            "tp3_alerted": False,
             "reversal_alerted": False,
             "status": current_status
         }
@@ -468,23 +488,24 @@ def update_active_positions(new_signals: list) -> list:
 
 def build_simplified_tg_report(payload: dict, trade_date: str) -> str:
     lines = [
-        f"📌【台股五大指數成分股｜高賺賠比戰術簡報｜{trade_date} 21:00】",
-        f"• 標的池：台灣50、中型100、富櫃50、富櫃200、MSCI ({payload.get('universe_quarter', '')})"
+        f"📌【台股五大指數成分股｜分%數移動停利戰報｜{trade_date} 21:00】",
+        f"• 範圍：台灣50、中型100、富櫃50、富櫃200、MSCI ({payload.get('universe_quarter', '')})"
     ]
     sigs = payload.get("new_signals", [])
     if not sigs:
-        lines.append("\n🛡️ 今日無符合「停損<=3.8% 且高賺賠比>=2.5:1」之嚴選標的，寧缺勿濫、空手觀望。")
+        lines.append("\n🛡️ 今日無符合條件之新標的，建議保留現金或續抱移動停利部位。")
     else:
-        for s in sigs[:8]:
+        for s in sigs[:10]:
             ep = s["exit_plan"]
             lines.append(
                 f"\n🎯 {s['stock_id']} {s['stock_name']}｜{s['strategy']}\n"
                 f"• 進場點建議：{ep['entry_low']} ～ {s['entry_price']} 元\n"
-                f"• 硬性停損點：{s['hard_stop']} 元 ({s['stop_pct']}%｜極窄防守)\n"
-                f"• 分批停利與目標價：\n"
-                f"  - 停利一 (TP1, 2.2R)：{ep['tp1_price']} 元 (減碼 {ep['tp1_reduce_pct']}% / 賣 {ep['tp1_reduce_lots']} 張)\n"
-                f"  - 目標價 (TP2, 4.0R)：{ep['tp2_price']} 元 (減碼 {ep['tp2_reduce_pct']}% / 賣 {ep['tp2_reduce_lots']} 張)\n"
-                f"  - 尾倉防守線：{ep['dynamic_trailing_stop']} 元 (剩餘 {ep['tp3_remain_pct']}% / {ep['tp3_remain_lots']} 張抱波段)\n"
+                f"• 初始停損點：{s['hard_stop']} 元 ({s['stop_pct']}%)\n"
+                f"• 分%數停利 ＆ 動態移動停利：\n"
+                f"  - 保本啟動 (+3.2%)：達 {ep['be_trigger_price']} 元 ➔ 停損自動上移至 {ep['be_lock_price']} 元 (+0.8%保本)\n"
+                f"  - 停利一 (+5.5%)：達 {ep['tp1_price']} 元 ➔ 減碼 {ep['tp1_reduce_pct']}% (賣 {ep['tp1_reduce_lots']} 張)，餘部啟動「最高價回落3%」移動停利\n"
+                f"  - 停利二 (+11.0%)：達 {ep['tp2_price']} 元 ➔ 再減碼 {ep['tp2_reduce_pct']}% (賣 {ep['tp2_reduce_lots']} 張)，餘部改守「最高價回落3.5%」移動停利\n"
+                f"  - 目標價 (+18.0%)：達 {ep['tp3_price']} 元 ➔ 尾倉 {ep['tp3_remain_pct']}% ({ep['tp3_remain_lots']} 張) 沿 10MA/回落4% 抱到底\n"
                 f"• 總部位控管：建議買進 {s['suggested_lots']} 張 (動用 {s['capital_used']//10000} 萬 / 佔總資金 {s['capital_pct']}%，最大風險 {s['max_loss_twd']:,} 元)"
             )
     return "\n".join(lines)
@@ -527,7 +548,7 @@ def main():
         print(f"⚠️ 批次下載異常: {e}")
 
     raw_candidates.sort(key=lambda x: x["indicators_backend"]["ud_vol_ratio"], reverse=True)
-    final_signals = raw_candidates[:8]
+    final_signals = raw_candidates[:10]
 
     active_list = update_active_positions(final_signals)
     report_payload = {
