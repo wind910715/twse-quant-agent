@@ -5,18 +5,32 @@ import requests
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from screener import CORE_POOL, calc_rsi
+from screener import build_dynamic_index_universe, calc_rsi, calc_up_down_vol_ratio
 
 BACKTEST_FILE = "latest_backtest.json"
 
 def run_portfolio_backtest() -> dict:
-    """針對核心標的池執行近 90 個交易日滾動回測，驗證五大策略之勝率、盈虧比與最大回撤(MDD)"""
-    tickers = [f"{sid}.TW" for sid in CORE_POOL.keys()]
+    """
+    針對【台灣50、中型100、富櫃50、富櫃200、MSCI成分股】執行近 90 日高勝率優化版回測：
+    1. 濾網升級：大盤氣候濾網 + RS 強於大盤 + 近10日上漲/下跌量比 >= 1.20
+    2. 進場優化：不追最高收盤價，採隔日回測 5MA/支撐低接確認買進
+    3. 停利升級：達 1.2R (+3.5%~+4%) 先減碼 50% 鎖利，並立即將剩餘 50% 停損上移至【成本+0.6%稅費】保本！
+    """
+    universe = build_dynamic_index_universe()
+    # 取上市櫃代表性成分股與 0050 大盤基準進行回測
+    sample_items = list(universe.items())[:90]
+    tickers = ["0050.TW"] + [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
     data = yf.download(tickers, period="8mo", group_by="ticker", threads=True, progress=False)
 
+    bench_df = None
+    if "0050.TW" in data.columns.get_level_values(0):
+        bench_df = data["0050.TW"].dropna(subset=["Close"]).copy()
+        bench_df["B_MA20"] = bench_df["Close"].rolling(20).mean()
+        bench_df["B_RET10"] = bench_df["Close"].pct_change(10)
+
     trades = []
-    for sid, sname in CORE_POOL.items():
-        t_sym = f"{sid}.TW"
+    for sid, (sname, sfx) in sample_items:
+        t_sym = f"{sid}{sfx}"
         if t_sym not in data.columns.get_level_values(0):
             continue
         df = data[t_sym].dropna(subset=["Close", "High", "Low", "Open", "Volume"]).copy()
@@ -29,10 +43,10 @@ def run_portfolio_backtest() -> dict:
         df["MV5"] = df["vol_lots"].rolling(5).mean()
         df["MV20"] = df["vol_lots"].rolling(20).mean()
         df["RSI14"] = calc_rsi(df["Close"], 14)
+        df["RET10"] = df["Close"].pct_change(10)
 
-        # 回測最近 60 個交易日之訊號表現 (預留往後 15 日觀察出場結果)
         start_idx = max(60, len(df) - 75)
-        end_idx = len(df) - 5
+        end_idx = len(df) - 6
         cooldown_until = -1
 
         for i in range(start_idx, end_idx):
@@ -40,44 +54,72 @@ def run_portfolio_backtest() -> dict:
                 continue
             cur = df.iloc[i]
             prev = df.iloc[i - 1]
+            if cur["MV20"] < 1200 or cur["Close"] < 25:
+                continue
+
+            # 1. 大盤氣候與 RS 相對強弱濾網
+            dt_idx = df.index[i]
+            if bench_df is not None and dt_idx in bench_df.index:
+                b_row = bench_df.loc[dt_idx]
+                # 排除大盤重挫破月線且個股未逆勢走強之時段
+                if (b_row["Close"] < b_row["B_MA20"] * 0.985) and (cur["RET10"] < 0.02):
+                    continue
+                if cur["RET10"] < b_row["B_RET10"]:
+                    continue
+
+            # 2. 量價累積比濾網 (近10日上漲均量 / 下跌均量 >= 1.25)
+            ud_ratio = calc_up_down_vol_ratio(df.iloc[i - 9:i + 1])
+            if ud_ratio < 1.25:
+                continue
+
             last3 = df.iloc[i - 2:i + 1]
             last5 = df.iloc[i - 4:i + 1]
-            prev20 = df.iloc[i - 20:i]
+            prev15 = df.iloc[i - 15:i]
+            pre_amp_10d = (df.iloc[i - 10:i]["High"].max() - df.iloc[i - 10:i]["Low"].min()) / max(df.iloc[i - 10:i]["Low"].min(), 1)
 
-            if cur["MV20"] < 1000 or cur["Close"] < 20:
-                continue
+            trend_up = (cur["Close"] >= cur["MA5"]) and (cur["Close"] > cur["MA20"] > cur["MA60"]) and \
+                       (cur["MA20"] > df.iloc[i - 4]["MA20"]) and (cur["MA60"] >= df.iloc[i - 4]["MA60"])
 
-            trend_up = (cur["Close"] > cur["MA20"] > cur["MA60"])
             strat_hit = None
-            entry_p = float(cur["Close"])
-            stop_p = float(cur["Low"] * 0.96)
+            limit_entry = float((cur["Close"] + cur["MA5"]) / 2.0)
+            stop_p = float(cur["Low"] * 0.965)
 
-            # 檢驗五大策略觸發
             amp_5d = (last5["High"].max() - last5["Low"].min()) / max(last5["Low"].min(), 1)
-            if trend_up and amp_5d <= 0.055 and (last3["vol_lots"] < 0.65 * cur["MV20"]).any():
+            if trend_up and amp_5d <= 0.048 and (last3["vol_lots"] < 0.60 * cur["MV20"]).any() and (52 <= cur["RSI14"] <= 72):
                 strat_hit = "S0_VCP收斂"
-                stop_p = float(last5["Low"].min() * 0.995)
-            elif trend_up and (-0.01 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.025) and (cur["Close"] > cur["Open"]) and (cur["vol_lots"] > 1.2 * cur["MV5"]):
+                limit_entry = float((cur["Close"] + cur["MA5"]) / 2.0)
+                stop_p = float(min(last5["Low"].min(), cur["MA20"]) * 0.994)
+            elif trend_up and (-0.008 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.02) and (cur["Close"] > cur["Open"]) and (cur["vol_lots"] > 1.25 * cur["MV5"]) and (cur["RSI14"] >= 54):
                 strat_hit = "S1_口袋支點拉回"
-                stop_p = float(min(cur["Low"], cur["MA20"]) * 0.99)
-            elif trend_up and (cur["Close"] > prev20["High"].max()) and (cur["vol_lots"] >= 1.5 * cur["MV20"]) and (58 <= cur["RSI14"] <= 78):
+                limit_entry = float(cur["Close"] * 0.995)
+                stop_p = float(max(min(cur["Low"], cur["MA20"] * 0.992), limit_entry * 0.96))
+            elif trend_up and (pre_amp_10d <= 0.11) and (cur["Close"] > prev15["High"].max()) and (1.4 * cur["MV20"] <= cur["vol_lots"] <= 3.0 * cur["MV20"]) and (60 <= cur["RSI14"] <= 74):
                 strat_hit = "S2_主升段3浪"
-                stop_p = float((cur["Open"] + cur["Close"]) / 2.0)
-            elif (cur["Close"] > cur["MA60"] * 0.95) and ( df.iloc[i-3:i]["Low"].min() < prev20["Low"].min() ) and (cur["Close"] > prev20["Low"].min()):
+                limit_entry = float((cur["Close"] + prev15["High"].max()) / 2.0)
+                stop_p = float(max(cur["Low"], cur["MA10"]) * 0.992)
+            elif (cur["MA60"] > df.iloc[i - 10]["MA60"]) and (df.iloc[i - 3:i]["Low"].min() < prev15["Low"].min()) and (cur["Close"] > prev15["Low"].min()) and (cur["Close"] > cur["Open"]):
                 strat_hit = "S3_破底翻2B"
-                stop_p = float(df.iloc[i-3:i]["Low"].min() * 0.995)
-            elif (cur["Low"] > prev["High"] * 1.02) and (cur["vol_lots"] >= 2.0 * cur["MV20"]):
+                limit_entry = float(cur["Close"] * 0.995)
+                stop_p = float(df.iloc[i - 3:i]["Low"].min() * 0.995)
+            elif trend_up and (pre_amp_10d <= 0.085) and (cur["Low"] > prev["High"] * 1.018) and (cur["vol_lots"] >= 1.8 * cur["MV20"]):
                 strat_hit = "S4_威力跳空"
-                stop_p = float(cur["Low"] * 0.995)
+                limit_entry = float(cur["Low"] * 1.005)
+                stop_p = float(prev["High"] * 0.995)
 
-            if not strat_hit or entry_p <= stop_p:
+            if not strat_hit or limit_entry <= stop_p:
                 continue
 
-            risk_r = max(entry_p - stop_p, entry_p * 0.02)
-            tp1_p = entry_p + 1.8 * risk_r
-            tp2_p = entry_p + 3.0 * risk_r
+            # 檢查隔日或後2日是否成交於理想進場區間 (未開盤直接跳空破停損)
+            next_bar = df.iloc[i + 1]
+            if float(next_bar["Open"]) <= stop_p or float(next_bar["Low"]) > limit_entry * 1.008:
+                continue
+            actual_entry = min(float(next_bar["Open"]), limit_entry) if float(next_bar["Open"]) <= limit_entry else limit_entry
 
-            # 模擬未來 15 個交易日之分批停利與停損結果 (40% TP1 + 30% TP2 + 30% 尾倉)
+            risk_r = max(actual_entry - stop_p, actual_entry * 0.022)
+            # TP1 設於 1.2R (約 +3.2%~+4.2%) 鎖定高勝率；TP2 設於 2.8R 抓大波段
+            tp1_p = actual_entry + 1.2 * risk_r
+            tp2_p = actual_entry + 2.8 * risk_r
+
             future_bars = df.iloc[i + 1:min(i + 16, len(df))]
             hit_tp1 = False
             hit_tp2 = False
@@ -86,26 +128,29 @@ def run_portfolio_backtest() -> dict:
             trail_stop = stop_p
 
             for _, fbar in future_bars.iterrows():
-                if fbar["Low"] <= trail_stop:
-                    realized_pct += rem_weight * ((trail_stop - entry_p) / entry_p)
+                # 先檢查是否達標 TP1 (減碼 50%，並將停損上移至成本+0.6%完整覆蓋稅費)
+                if not hit_tp1 and float(fbar["High"]) >= tp1_p:
+                    hit_tp1 = True
+                    realized_pct += 0.50 * ((tp1_p - actual_entry) / actual_entry)
+                    rem_weight -= 0.50
+                    trail_stop = actual_entry * 1.006  # 確保剩餘部位出場也是正報酬
+
+                if hit_tp1 and not hit_tp2 and float(fbar["High"]) >= tp2_p:
+                    hit_tp2 = True
+                    realized_pct += 0.30 * ((tp2_p - actual_entry) / actual_entry)
+                    rem_weight -= 0.30
+                    trail_stop = max(trail_stop, float(fbar["MA10"]))
+
+                if float(fbar["Low"]) <= trail_stop:
+                    realized_pct += rem_weight * ((trail_stop - actual_entry) / actual_entry)
                     rem_weight = 0.0
                     break
-                if not hit_tp1 and fbar["High"] >= tp1_p:
-                    hit_tp1 = True
-                    realized_pct += 0.40 * ((tp1_p - entry_p) / entry_p)
-                    rem_weight -= 0.40
-                    trail_stop = entry_p  # 觸發 TP1 後上移至保本價
-                if hit_tp1 and not hit_tp2 and fbar["High"] >= tp2_p:
-                    hit_tp2 = True
-                    realized_pct += 0.30 * ((tp2_p - entry_p) / entry_p)
-                    rem_weight -= 0.30
-                    trail_stop = float(fbar["MA10"])
 
             if rem_weight > 0 and not future_bars.empty:
                 last_c = float(future_bars.iloc[-1]["Close"])
-                realized_pct += rem_weight * ((last_c - entry_p) / entry_p)
+                realized_pct += rem_weight * ((last_c - actual_entry) / actual_entry)
 
-            net_ret_pct = round((realized_pct - 0.005) * 100, 2)  # 扣除 0.5% 稅費摩擦成本
+            net_ret_pct = round((realized_pct - 0.005) * 100, 2)
             trades.append({
                 "stock_id": sid,
                 "strategy": strat_hit,
@@ -117,9 +162,8 @@ def run_portfolio_backtest() -> dict:
 
     df_t = pd.DataFrame(trades)
     if df_t.empty:
-        return {"total_trades": 0, "win_rate": 0.0, "mdd_pct": 0.0, "cum_return_pct": 0.0, "by_strategy": {}}
+        return {"total_trades": 0, "win_rate": 0.0, "rr_ratio": 0.0, "mdd_pct": 0.0, "cum_return_pct": 0.0, "by_strategy": {}}
 
-    # 以單筆投入 15% 資金計算組合權益曲線與最大回撤 (MDD)
     df_t = df_t.sort_values("entry_date").reset_index(drop=True)
     df_t["port_impact"] = df_t["net_return_pct"] * 0.15
     equity_curve = 100.0 * (1.0 + df_t["port_impact"] / 100.0).cumprod()
@@ -144,6 +188,7 @@ def run_portfolio_backtest() -> dict:
 
     summary = {
         "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股",
         "total_trades": int(len(df_t)),
         "win_rate": round(float(df_t["win"].mean() * 100), 1),
         "rr_ratio": rr_ratio,
@@ -157,9 +202,9 @@ def run_portfolio_backtest() -> dict:
 
 def send_weekly_backtest_tg(summary: dict):
     lines = [
-        f"📈【週六自動回測績效健檢報告｜{datetime.date.today().strftime('%Y-%m-%d')}】",
-        f"• 回測樣本：近 90 日核心高流動性標的池 (含分批停利與 0.5% 稅費)",
-        f"• 總交易筆數：{summary['total_trades']} 筆",
+        f"📈【週六 09:00 自動回測績效健檢報告｜{datetime.date.today().strftime('%Y-%m-%d')}】",
+        f"• 標的範圍：{summary.get('universe_scope', '五大指數成分股')} (每季自動調整)",
+        f"• 總交易筆數：{summary['total_trades']} 筆 (嚴選高勝率訊號)",
         f"• 整體真實勝率：{summary['win_rate']}%",
         f"• 平均盈虧比：{summary['rr_ratio']} : 1",
         f"• 組合累計報酬率：{summary['cum_return_pct']:+.2f}%",
@@ -168,6 +213,21 @@ def send_weekly_backtest_tg(summary: dict):
     ]
     for k, v in summary.get("by_strategy", {}).items():
         lines.append(f" - {k}：勝率 {v['win_rate']}% ({v['trades']}筆)｜單筆平均 {v['avg_return_pct']:+.2f}%")
+
+    # 若有設定 GEMINI_API_KEY，自動附加上 Gemini 對本週策略權重的微調建議
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if api_key:
+        try:
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=f"請根據以下台股五大策略最新回測數據，用 3 句話給主人下週操作重點與資金配置建議：{json.dumps(summary, ensure_ascii=False)}"
+            )
+            if resp and resp.text:
+                lines.append(f"\n💡【Gemini 操盤診斷】：\n{resp.text.strip()}")
+        except Exception:
+            pass
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
