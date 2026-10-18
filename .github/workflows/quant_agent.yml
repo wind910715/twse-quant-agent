@@ -1,0 +1,49 @@
+name: TWSE Quant Agent (21:00 Screener + Intraday Monitor)
+
+on:
+  schedule:
+    # 任務 A：台灣時間週一至週五 晚間 21:00 (UTC 13:00) 執行盤後四因子選股
+    - cron: '0 13 * * 1-5'
+    # 任務 B：台灣時間週一至週五 盤中 09:00~13:35 (UTC 01:00~05:35) 每 5 分鐘啟動即時監控
+    - cron: '*/5 1-5 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  quant-task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 檢出倉庫程式碼與持倉狀態
+        uses: actions/checkout@v4
+
+      - name: 2. 安裝 Python 與套件
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+
+      - name: 3. 判斷時段執行「盤中即時停損停利監控」或「21:00 盤後選股」
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          HOUR_UTC=$(date -u +%H)
+          if [ "$HOUR_UTC" -ge 12 ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "執行晚間 21:00 盤後四因子選股..."
+            python screener.py
+          else
+            echo "執行盤中 09:00-13:35 停損停利即時巡邏..."
+            python monitor.py
+          fi
+
+      - name: 4. 同步寫回最新選股報告與持倉狀態 (供 Gemini 讀取)
+        run: |
+          git config --local user.email "quant-bot@github.com"
+          git config --local user.name "Quant Task Agent"
+          git add latest_report.json active_positions.json || true
+          git diff --staged --quiet || (git commit -m "Sync state $(date +'%Y-%m-%d %H:%M')" && git push)
