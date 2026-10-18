@@ -7,7 +7,7 @@ import pandas as pd
 import yfinance as yf
 
 # ==========================================
-# 1. 全局風控與【Alpha v5.0 Master 最終實戰定版】設定 (SSOT)
+# 1. 全局風控與【Alpha v4.5 Golden 黃金合體版】設定 (SSOT)
 # ==========================================
 CONFIG = {
     "ACCOUNT_EQUITY": 3_000_000,   # 預設總資金 300 萬元
@@ -16,9 +16,9 @@ CONFIG = {
     "MIN_MV20_LOTS": 1000,         # 20日均量門檻 >= 1,000 張
     "MIN_PRICE": 25.0,             # 最低股價門檻 >= 25 元
     "MAX_STOP_PCT": 0.025,         # 初始硬性停損上限 -2.5%
-    # 四階分%數停利與移動停利黃金配重 (20% / 30% / 25% / 25%尾倉)
-    "BE_ACTIVATE_PCT": 0.032,      # 漲達 +3.2% 啟動零虧損保本盾 (盤中底線鎖死 買進價+0.8%)
-    "TP1_TARGET_PCT": 0.065,       # 停利一 (TP1)：+6.5% 輕減碼 20%，底線鎖 +3.0% (保留80%主力部位衝波段)
+    # 結合 v4.0 (+5.5% 高勝率觸發) 與 v5.0 (+14%/+25% 高報酬尾倉)
+    "BE_ACTIVATE_PCT": 0.030,      # 漲達 +3.0% 啟動零虧損保本盾 (盤中底線鎖死 買進價+0.8%)
+    "TP1_TARGET_PCT": 0.055,       # 停利一 (TP1)：改回 v4.0 黃金點位 +5.5% (輕減碼 20%，底線鎖 +2.8%，觸發零風險加碼)
     "TP2_TARGET_PCT": 0.140,       # 停利二 (TP2)：+14.0% 減碼 30%，底線鎖 +8.5%
     "TP3_TARGET_PCT": 0.250,       # 停利三 (TP3)：+25.0% 減碼 25%，底線鎖 +16.0%，剩餘25%尾倉沿 20MA 抱到底
 }
@@ -186,13 +186,6 @@ def calc_position_size(entry: float, stop: float) -> dict:
     }
 
 def calc_pct_trailing_exit_plan(entry: float, hard_stop: float, total_lots: int, ind: dict) -> dict:
-    """
-    【Alpha v5.0 Master 黃金配重停利計畫】：
-    - 漲達 +3.2%：啟動盤中保本盾 (底線鎖死 買進價+0.8%)
-    - 停利一 TP1 (+6.5%)：僅輕減碼 20%，保留 80% 主力部位衝刺大波段，底線鎖 +3.0%
-    - 停利二 TP2 (+14.0%)：減碼 30%，底線鎖 +8.5%
-    - 停利三 TP3 (+25.0%)：減碼 25%，底線鎖 +16.0%，最後 25% 尾倉沿 20MA 抱滿主升段
-    """
     entry_low = round(entry, 2)
     entry_high = round(entry * 1.028, 2)
 
@@ -318,7 +311,7 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
 
     matched = []
 
-    # S0: VCP 右側極致收斂突破
+    # S0: VCP 右側極致收斂突破 (v5.0 單筆 +3.09% 公式)
     amp_4d = (df.iloc[-5:-1]["High"].max() - df.iloc[-5:-1]["Low"].min()) / max(df.iloc[-5:-1]["Low"].min(), 1)
     vdu_ok = (df.iloc[-5:-1]["vol_lots"] < 0.62 * cur["MV20"]).any()
     if trend_up and (amp_4d <= 0.040) and vdu_ok and (cur["Close"] >= df.iloc[-5:-1]["High"].max()) and \
@@ -358,7 +351,7 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
         stop = round(float(max(cur["Low"] * 0.996, entry * 0.976)), 2)
         matched.append(("S3_破底翻2B", entry, stop))
 
-    # S4: 達瓦斯箱型威力跳空 (100% 勝率、單筆 +11.73% 暴利引擎)
+    # S4: 達瓦斯箱型威力跳空 (100% 勝率、單筆 +13.67% 暴利引擎)
     box_amp_10 = (df.iloc[-11:-1]["High"].max() - df.iloc[-11:-1]["Low"].min()) / max(df.iloc[-11:-1]["Low"].min(), 1)
     breakout_power = (cur["Close"] > prev_10_high) and ((cur["Open"] > prev["Close"] * 1.010) or (cur["Close"] >= prev["Close"] * 1.032))
     if trend_up and (box_amp_10 <= 0.090) and breakout_power and (candle_pos >= 0.72) and \
@@ -367,11 +360,11 @@ def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, chip_info: dict, 
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.976)), 2)
         matched.append(("S4_威力跳空", entry, stop))
 
-    # S5: 法人創高鎖碼突破 (升級：四線多頭 + 創10日收盤新高 + MACD動能翻紅放大 + 低乖離鎖碼)
-    prev_10_close_high = df.iloc[-11:-1]["Close"].max()
-    if trend_up and (cur["MA5"] >= cur["MA10"] >= cur["MA20"]) and (cur["Close"] > prev_10_close_high) and \
-       (cur["Close"] > cur["Open"] * 1.015) and (candle_pos >= 0.75) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0) and \
-       (ud_vol_ratio >= 1.45) and (0.005 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.032) and (56 <= cur["RSI14"] <= 70) and chip_positive:
+    # S5: 法人爆量突破後「首次量縮回測 5MA/10MA 轉強」(根除追高虧損)
+    recent_surge = ((df.iloc[-6:-1]["vol_lots"] >= 1.8 * df.iloc[-6:-1]["MV20"]) & (df.iloc[-6:-1]["Close"] >= df.iloc[-6:-1]["Open"] * 1.025)).any()
+    pullback_hold = (prev["vol_lots"] < cur["MV5"]) and (cur["Low"] <= cur["MA5"] * 1.008) and (cur["Close"] >= cur["MA5"]) and (cur["Close"] > prev["High"])
+    if trend_up and (cur["MA5"] >= cur["MA10"] >= cur["MA20"]) and recent_surge and pullback_hold and \
+       (cur["Close"] > cur["Open"] * 1.01) and (candle_pos >= 0.70) and (ud_vol_ratio >= 1.45) and (54 <= cur["RSI14"] <= 68) and chip_positive:
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(cur["MA10"] * 0.995, entry * 0.976)), 2)
         matched.append(("S5_法人量價共振", entry, stop))
@@ -496,7 +489,7 @@ def update_active_positions(new_signals: list) -> list:
 
 def build_simplified_tg_report(payload: dict, trade_date: str) -> str:
     lines = [
-        f"📌【台股五大指數成分股｜Alpha v5.0 Master 定版戰報｜{trade_date} 21:00】",
+        f"📌【台股五大指數成分股｜Alpha v4.5 Golden 定版戰報｜{trade_date} 21:00】",
         f"• 範圍：台灣50、中型100、富櫃50、富櫃200、MSCI ({payload.get('universe_quarter', '')})"
     ]
     sigs = payload.get("new_signals", [])
@@ -508,10 +501,10 @@ def build_simplified_tg_report(payload: dict, trade_date: str) -> str:
             lines.append(
                 f"\n🎯 {s['stock_id']} {s['stock_name']}｜{s['strategy']}\n"
                 f"• 進場點建議：明日開盤後轉強突破 {s['entry_price']} 元 (上限 {ep['entry_high']} 元)\n"
-                f"• 初始停損點：{s['hard_stop']} 元 ({s['stop_pct']}%｜首日假突破或2日不漲主動汰弱)\n"
+                f"• 初始停損點：{s['hard_stop']} 元 ({s['stop_pct']}%｜2日不漲破5MA主動汰弱)\n"
                 f"• 四階分%數停利 ＆ 20MA 移動停利：\n"
-                f"  - 保本盾 (+3.2%)：達 {ep['be_trigger_price']} 元 ➔ 底線鎖死 {ep['be_lock_price']} 元 (+0.8%)\n"
-                f"  - 停利一 (+6.5%)：達 {ep['tp1_price']} 元 ➔ 輕減碼 {ep['tp1_reduce_pct']}% (賣 {ep['tp1_reduce_lots']} 張)，底線鎖 +3.0%\n"
+                f"  - 保本盾 (+3.0%)：達 {ep['be_trigger_price']} 元 ➔ 底線鎖死 {ep['be_lock_price']} 元 (+0.8%)\n"
+                f"  - 停利一 (+5.5%)：達 {ep['tp1_price']} 元 ➔ 輕減碼 {ep['tp1_reduce_pct']}% (賣 {ep['tp1_reduce_lots']} 張)，底線鎖 +2.8%\n"
                 f"  - 停利二 (+14.0%)：達 {ep['tp2_price']} 元 ➔ 再減碼 {ep['tp2_reduce_pct']}% (賣 {ep['tp2_reduce_lots']} 張)，底線鎖 +8.5%\n"
                 f"  - 目標價 (+25.0%)：達 {ep['tp3_price']} 元 ➔ 尾倉 {ep['tp3_remain_pct']}% ({ep['tp3_remain_lots']} 張) 沿 20MA 抱到底\n"
                 f"• 總部位控管：建議買進 {s['suggested_lots']} 張 (動用 {s['capital_used']//10000} 萬 / 佔總資金 {s['capital_pct']}%，最大風險 {s['max_loss_twd']:,} 元)"
