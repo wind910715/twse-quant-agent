@@ -1,43 +1,43 @@
 {
-  "generated_at": "2026-10-18 16:01:33",
+  "generated_at": "2026-10-18 16:13:19",
   "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股",
-  "total_trades": 86,
-  "win_rate": 54.7,
-  "rr_ratio": 0.53,
-  "avg_win_pct": 1.77,
-  "avg_loss_pct": -3.32,
-  "cum_return_pct": -8.97,
-  "mdd_pct": -10.42,
+  "total_trades": 68,
+  "win_rate": 52.9,
+  "rr_ratio": 1.16,
+  "avg_win_pct": 4.69,
+  "avg_loss_pct": -4.05,
+  "cum_return_pct": 9.54,
+  "mdd_pct": -8.34,
   "by_strategy": {
     "S0_VCP收斂": {
-      "trades": 4,
-      "win_rate": 75.0,
-      "avg_return_pct": 1.08
+      "trades": 6,
+      "win_rate": 50.0,
+      "avg_return_pct": -0.17
     },
     "S1_口袋支點拉回": {
-      "trades": 6,
-      "win_rate": 83.3,
-      "avg_return_pct": 1.18
+      "trades": 7,
+      "win_rate": 71.4,
+      "avg_return_pct": 2.87
     },
     "S2_主升段3浪": {
-      "trades": 44,
-      "win_rate": 47.7,
-      "avg_return_pct": -1.02
+      "trades": 3,
+      "win_rate": 66.7,
+      "avg_return_pct": 3.64
     },
     "S3_破底翻2B": {
-      "trades": 2,
-      "win_rate": 50.0,
-      "avg_return_pct": -1.15
+      "trades": 50,
+      "win_rate": 52.0,
+      "avg_return_pct": 0.29
     },
     "S4_威力跳空": {
-      "trades": 20,
-      "win_rate": 60.0,
-      "avg_return_pct": -0.28
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_return_pct": 0.0
     },
     "S5_法人量價共振": {
-      "trades": 10,
-      "win_rate": 50.0,
-      "avg_return_pct": -0.51
+      "trades": 2,
+      "win_rate": 0.0,
+      "avg_return_pct": -2.71
     }
   }
 }
