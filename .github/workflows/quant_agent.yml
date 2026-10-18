@@ -1,23 +1,28 @@
-name: TWSE Quant Agent (21:00 Screener + Intraday Monitor)
+name: TWSE Quant Agent (Screener + Intraday Monitor + Saturday Backtest)
 
 on:
   schedule:
-    # 台灣時間週一至週五 晚間 21:00 (UTC 13:00) 執行盤後四因子選股
+    # 1. 週一至週五 晚間 21:00 (UTC 13:00)：執行盤後選股與極簡戰報推播
     - cron: '0 13 * * 1-5'
-    # 台灣時間週一至週五 盤中 09:00~13:35 (UTC 01:00~05:35) 每 5 分鐘啟動即時監控
+    # 2. 週一至週五 盤中 09:00~13:35 (UTC 01:00~05:35)：每 5 分鐘啟動(內部每30秒)買賣點隨侍偵測
     - cron: '*/5 1-5 * * 1-5'
+    # 3. 每週六 上午 10:00 (UTC 02:00)：自動執行歷史回測確認勝率與 MDD
+    - cron: '0 2 * * 6'
   workflow_dispatch:
+    inputs:
+      task_mode:
+        description: '手動測試模式 (screener / monitor / backtest)'
+        required: false
+        default: 'screener'
 
 permissions:
   contents: write
 
 env:
-  # 消除 Node.js 20 棄用警告，平滑相容 Node.js 24
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   quant-task:
-    # 鎖定穩定版 ubuntu-24.04，避免 2026/10/19 Ubuntu 26 升級造成套件崩潰
     runs-on: ubuntu-24.04
     steps:
       - name: 1. 檢出倉庫程式碼與持倉狀態
@@ -30,32 +35,36 @@ jobs:
           cache: 'pip'
       - run: pip install --upgrade pip && pip install -r requirements.txt
 
-      - name: 3. 執行選股或盤中停損停利即時巡邏
+      - name: 3. 依排程時段自動分流執行任務
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          DOW=$(date -u +%u)   # 1-5為週一至週五, 6為週六
           HOUR_UTC=$(date -u +%H)
-          if [ "$HOUR_UTC" -ge 12 ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "🚀 啟動盤後四因子選股引擎 (screener.py)..."
+          MODE="${{ github.event.inputs.task_mode }}"
+
+          if [ "$MODE" = "backtest" ] || [ "$DOW" -eq 6 ]; then
+            echo "📈 執行每週六自動回測績效健檢 (backtest.py)..."
+            python backtest.py
+          elif [ "$MODE" = "screener" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$HOUR_UTC" -ge 12 ]; then
+            echo "📌 執行晚間 21:00 選股與極簡通知 (screener.py)..."
             python screener.py
           else
-            echo "🛡️ 啟動盤中停損停利即時監控 (monitor.py)..."
+            echo "🛡️ 執行盤中進場點與停利停損隨侍監控 (monitor.py)..."
             python monitor.py
           fi
 
-      - name: 4. 同步寫回最新選股報告與持倉狀態 (供 Gemini 讀取)
+      - name: 4. 同步寫回最新選股、持倉與週六回測數據 (供 Gemini 同步讀取)
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
-          touch latest_report.json active_positions.json
-          git add latest_report.json active_positions.json || true
+          touch latest_report.json active_positions.json latest_backtest.json
+          git add latest_report.json active_positions.json latest_backtest.json || true
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
             git pull --rebase origin main || true
             git push origin HEAD || true
-          else
-            echo "狀態無變更，無須重新推送。"
           fi
