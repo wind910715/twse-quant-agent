@@ -95,11 +95,11 @@ def check_positions_once() -> bool:
                 pos["highest_price"] = max(live, day_high)
                 pos["entry_time"] = now_str
                 modified = True
-                send_telegram_alert("🟢 盤中右側轉強買點觸發｜啟動 Alpha v2.0 移動停利", [
+                send_telegram_alert("🟢 盤中右側轉強買點觸發｜啟動 Alpha v3.0 雙階減險與移動停利", [
                     f"• 標的：{sid} {sname} ({pos.get('strategy', '')})",
                     f"• 觸發成交價：{live} 元 (突破轉強價 {trigger_buy} 元)",
-                    f"• 總部位建議：買進 {pos['suggested_lots']} 張 (佔總資金 {pos.get('capital_pct', 20)}%)",
-                    f"• 初始停損點：{pos['hard_stop']} 元 ({pos.get('stop_pct', -2.8)}%)",
+                    f"• 總部位建議：買進 {pos['suggested_lots']} 張 (佔總資金 {pos.get('capital_pct', 25)}%)",
+                    f"• 初始停損點：{pos['hard_stop']} 元 ({pos.get('stop_pct', -2.6)}%)",
                     f"• 分%數停利點：+7.5%({pos['tp1_price']}元)減碼30% ➔ +16%({pos['tp2_price']}元)減碼30% ➔ +28%({pos['tp3_price']}元)"
                 ])
                 continue
@@ -122,7 +122,7 @@ def check_positions_once() -> bool:
             pos["status"] = "TRAILING_PROFIT_EXIT" if is_profit_exit else "STOPPED_OUT"
             pos["remaining_lots"] = 0
             modified = True
-            title_str = "💰 觸發鎖利底線/移動停利｜獲利出清" if is_profit_exit else "⛔ 觸發初始硬性停損｜立即清倉"
+            title_str = "💰 觸發鎖利底線/移動停利｜獲利出清" if is_profit_exit else "⛔ 觸發防守停損｜立即清倉"
             gain_pct = round(((live - entry_p) / entry_p) * 100, 2)
             send_telegram_alert(title_str, [
                 f"• 標的：{sid} {sname}｜現價：{live} 元 ({gain_pct:+.2f}%)",
@@ -131,7 +131,14 @@ def check_positions_once() -> bool:
             ])
             continue
 
-        # 2. 停利一 (TP1: +7.5%) 減碼 30%，盤中鎖利底線上移至 +2.5%
+        # 2. 第一階減險：漲達 +3.0% 自動將停損從 -2.6% 收緊至 -0.8% (砍掉三分之二風險)
+        if live >= pos.get("half_risk_trigger", entry_p * 1.030) and not pos.get("half_risk_locked", False):
+            pos["half_risk_locked"] = True
+            half_stop = pos.get("half_risk_stop", round(entry_p * 0.992, 2))
+            pos["dynamic_trailing_stop"] = max(trail_stop, half_stop)
+            modified = True
+
+        # 3. 停利一 (TP1: +7.5%) 減碼 30%，盤中鎖利底線上移至 +2.5%
         if live >= pos.get("tp1_price", 999999) and not pos.get("tp1_alerted", False):
             pos["tp1_alerted"] = True
             pos["be_locked"] = True
@@ -146,7 +153,7 @@ def check_positions_once() -> bool:
             ])
             continue
 
-        # 3. 停利二 (TP2: +16.0%) 再減碼 30%，鎖利底線上移至 +8.5%
+        # 4. 停利二 (TP2: +16.0%) 再減碼 30%，鎖利底線上移至 +8.5%
         if live >= pos.get("tp2_price", 999999) and not pos.get("tp2_alerted", False):
             pos["tp2_alerted"] = True
             sell_lots = min(rem_lots, pos.get("tp2_reduce_lots", 1))
@@ -160,7 +167,7 @@ def check_positions_once() -> bool:
             ])
             continue
 
-        # 4. 波段目標價 (TP3: +28.0%)
+        # 5. 波段目標價 (TP3: +28.0%)
         if live >= pos.get("tp3_price", 999999) and not pos.get("tp3_alerted", False):
             pos["tp3_alerted"] = True
             sell_lots = max(1, int(round(rem_lots * 0.50)))
