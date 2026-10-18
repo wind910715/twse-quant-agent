@@ -85,37 +85,30 @@ def check_positions_once() -> bool:
         day_open = q["open"]
         prev_c = q["prev_close"]
 
-        # ====================================================
         # 階段 A：盤中偵測【合適進場點觸發】(WATCHING ➔ HOLDING)
-        # ====================================================
         if status == "WATCHING" and not pos.get("entry_alerted", False):
             e_low = pos.get("entry_low", pos["entry_price"] * 0.99)
-            e_high = pos.get("entry_high", pos["entry_price"] * 1.015)
-            # 觸發條件：股價進入建議進場區間 (拉回守住支撐且翻紅，或帶量突破買點) 且高於硬性停損
+            e_high = pos.get("entry_high", pos["entry_price"] * 1.012)
             if (e_low <= live <= e_high) and (live >= day_open) and (live > pos["hard_stop"]):
                 pos["status"] = "HOLDING"
                 pos["entry_alerted"] = True
                 pos["actual_entry_price"] = live
                 pos["entry_time"] = now_str
                 modified = True
-                send_telegram_alert("🟢 盤中買進訊號觸發｜自動轉入持倉監控", [
+                send_telegram_alert("🟢 盤中買進訊號觸發｜轉入高賺賠比持倉監控", [
                     f"• 標的：{sid} {sname} ({pos.get('strategy', '')})",
-                    f"• 觸發成交價：{live} 元 (進入建議買點區間 {e_low}～{pos['entry_price']} 元)",
+                    f"• 觸發成交價：{live} 元 (建議區間 {e_low}～{pos['entry_price']} 元)",
                     f"• 總部位建議：買進 {pos['suggested_lots']} 張 (佔總資金 {pos.get('capital_pct', 15)}%)",
-                    f"• 硬性停損點：{pos['hard_stop']} 元 ({pos.get('stop_pct', -4)}%)",
-                    f"• 分批停利點：TP1 {pos['tp1_price']}元 (減碼{pos['tp1_reduce_pct']}%) ／ 目標價TP2 {pos['tp2_price']}元 (減碼{pos['tp2_reduce_pct']}%)"
+                    f"• 硬性停損點：{pos['hard_stop']} 元 ({pos.get('stop_pct', -3)}%)",
+                    f"• 分批停利點：TP1(2.2R) {pos['tp1_price']}元 (減碼{pos['tp1_reduce_pct']}%) ／ 目標價TP2(4.0R) {pos['tp2_price']}元 (減碼{pos['tp2_reduce_pct']}%)"
                 ])
                 continue
 
-        # ====================================================
-        # 階段 B：已持倉標的【停損 / 變盤 / 分批停利】即時偵測
-        # ====================================================
         if pos.get("status") != "HOLDING":
             continue
 
         rem_lots = pos.get("remaining_lots", pos.get("suggested_lots", 1))
         hard_stop = pos.get("hard_stop", 0)
-        dyn_stop = pos.get("dynamic_trailing_stop", hard_stop)
         cdp_al = pos.get("cdp_al", hard_stop)
 
         # 1. 硬性停損觸發 (100% 清倉)
@@ -124,15 +117,21 @@ def check_positions_once() -> bool:
             pos["remaining_lots"] = 0
             modified = True
             send_telegram_alert("⛔ 硬性停損觸發｜立即清倉", [
-                f"• 標的：{sid} {sname}",
-                f"• 當前價：{live} 元 (跌破停損點 {hard_stop} 元)",
+                f"• 標的：{sid} {sname}｜當前價：{live} 元 (跌破防守點 {hard_stop} 元)",
                 f"• 行動建議：請立即市價賣出 100% 部位 (出清剩餘 {rem_lots} 張)"
             ])
             continue
 
-        # 2. 盤中突發變盤 (開高走低 A 轉或貫穿極限支撐)
-        intraday_surge = ((day_high - prev_c) / max(prev_c, 1)) >= 0.03
-        pullback_from_high = ((day_high - live) / max(day_high, 1)) >= 0.035
+        # 2. 突破 +1.4R 自動啟動保本防線
+        be_trig = pos.get("breakeven_trigger", pos["entry_price"] * 1.04)
+        if live >= be_trig and not pos.get("be_locked", False):
+            pos["be_locked"] = True
+            pos["hard_stop"] = round(max(hard_stop, pos["entry_price"] * 1.006), 2)
+            modified = True
+
+        # 3. 盤中突發變盤 (開高走低 A 轉)
+        intraday_surge = ((day_high - prev_c) / max(prev_c, 1)) >= 0.035
+        pullback_from_high = ((day_high - live) / max(day_high, 1)) >= 0.038
         turned_black = (live < day_open) and (live < prev_c)
         broke_al = (live <= cdp_al) and (live < pos.get("max_vol_low", live))
 
@@ -148,37 +147,37 @@ def check_positions_once() -> bool:
             ])
             continue
 
-        # 3. 第一階段停利 (TP1)
+        # 4. 第一階段停利 (TP1: 2.2R)
         if live >= pos.get("tp1_price", 999999) and not pos.get("tp1_alerted", False):
             pos["tp1_alerted"] = True
             sell_lots = min(rem_lots, pos.get("tp1_reduce_lots", 1))
-            sell_pct = pos.get("tp1_reduce_pct", 40)
+            sell_pct = pos.get("tp1_reduce_pct", 30)
             pos["remaining_lots"] = max(0, rem_lots - sell_lots)
-            pos["dynamic_trailing_stop"] = round(max(pos["entry_price"], pos.get("poc_price", 0), pos.get("ma10", 0) * 0.99), 2)
+            pos["dynamic_trailing_stop"] = round(max(pos["entry_price"] * 1.01, pos.get("poc_price", 0), pos.get("ma10", 0) * 0.99), 2)
             modified = True
-            send_telegram_alert(f"🎯 停利一(TP1)達標｜減碼 {sell_pct}% ({sell_lots}張)", [
+            send_telegram_alert(f"🎯 停利一(TP1, 2.2R)達標｜減碼 {sell_pct}% ({sell_lots}張)", [
                 f"• 標的：{sid} {sname}｜現價：{live} 元 (達 TP1 {pos['tp1_price']} 元)",
                 f"• 行動建議：獲利賣出 {sell_lots} 張，剩餘 {pos['remaining_lots']} 張防守線上移至 {pos['dynamic_trailing_stop']} 元 (目標價看 {pos['tp2_price']} 元)"
             ])
             continue
 
-        # 4. 第二階段目標價停利 (TP2)
+        # 5. 第二階段目標價停利 (TP2: 4.0R)
         if live >= pos.get("tp2_price", 999999) and not pos.get("tp2_alerted", False):
             pos["tp2_alerted"] = True
             sell_lots = min(rem_lots, pos.get("tp2_reduce_lots", 1))
             sell_pct = pos.get("tp2_reduce_pct", 30)
             pos["remaining_lots"] = max(0, rem_lots - sell_lots)
-            pos["dynamic_trailing_stop"] = round(max(pos["dynamic_trailing_stop"], pos.get("ma5", live * 0.97)), 2)
+            pos["dynamic_trailing_stop"] = round(max(pos["dynamic_trailing_stop"], pos.get("ma10", live * 0.97)), 2)
             if pos["remaining_lots"] == 0:
                 pos["status"] = "TAKE_PROFIT_COMPLETED"
             modified = True
-            send_telegram_alert(f"🚀 目標價(TP2)達標｜再減碼 {sell_pct}% ({sell_lots}張)", [
+            send_telegram_alert(f"🚀 目標價(TP2, 4.0R)達標｜再減碼 {sell_pct}% ({sell_lots}張)", [
                 f"• 標的：{sid} {sname}｜現價：{live} 元 (達目標價 {pos['tp2_price']} 元)",
-                f"• 行動建議：再獲利賣出 {sell_lots} 張，尾倉 {pos['remaining_lots']} 張防守線上移至 {pos['dynamic_trailing_stop']} 元"
+                f"• 行動建議：再獲利賣出 {sell_lots} 張，波段尾倉 {pos['remaining_lots']} 張防守線上移至 {pos['dynamic_trailing_stop']} 元"
             ])
             continue
 
-        # 5. 尾倉跌破動態防守線
+        # 6. 尾倉跌破動態防守線
         if pos.get("tp1_alerted", False) and live <= pos.get("dynamic_trailing_stop", 0):
             pos["status"] = "TRAILING_PROFIT_EXIT"
             exit_lots = pos.get("remaining_lots", 1)
@@ -186,7 +185,7 @@ def check_positions_once() -> bool:
             modified = True
             send_telegram_alert("💰 尾倉觸發移動停利｜全數獲利入袋", [
                 f"• 標的：{sid} {sname}｜現價：{live} 元 (跌破尾倉防守 {pos['dynamic_trailing_stop']} 元)",
-                f"• 行動建議：尾倉 {exit_lots} 張全數獲利出清"
+                f"• 行動建議：波段尾倉 {exit_lots} 張全數獲利出清"
             ])
 
     if modified:
