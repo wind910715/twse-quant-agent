@@ -1,19 +1,19 @@
-name: TWSE Quant Agent (Screener + Intraday Monitor + Saturday Backtest)
+name: TWSE Quant Agent (21:00 Screener + Intraday Monitor + Sat 09:00 Backtest)
 
 on:
   schedule:
-    # 1. 週一至週五 晚間 21:00 (UTC 13:00)：執行盤後選股與極簡戰報推播
+    # 1. 週一至週五 晚間 21:00 (UTC 13:00)：執行五大指數成分股選股與極簡戰報
     - cron: '0 13 * * 1-5'
-    # 2. 週一至週五 盤中 09:00~13:35 (UTC 01:00~05:35)：每 5 分鐘啟動(內部每30秒)買賣點隨侍偵測
+    # 2. 週一至週五 盤中 09:00~13:35 (UTC 01:00~05:35)：每 5 分鐘(內部每30秒)隨侍偵測進出場
     - cron: '*/5 1-5 * * 1-5'
-    # 3. 每週六 上午 10:00 (UTC 02:00)：自動執行歷史回測確認勝率與 MDD
-    - cron: '0 2 * * 6'
+    # 3. 每週六 早上 09:00 (UTC 01:00)：自動執行歷史回測確認勝率與 MDD
+    - cron: '0 1 * * 6'
   workflow_dispatch:
     inputs:
       task_mode:
         description: '手動測試模式 (screener / monitor / backtest)'
         required: false
-        default: 'screener'
+        default: 'backtest'
 
 permissions:
   contents: write
@@ -25,7 +25,7 @@ jobs:
   quant-task:
     runs-on: ubuntu-24.04
     steps:
-      - name: 1. 檢出倉庫程式碼與持倉狀態
+      - name: 1. 檢出倉庫程式碼與快取狀態
         uses: actions/checkout@v4
 
       - name: 2. 安裝 Python 3.11 與量化套件
@@ -42,14 +42,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          DOW=$(date -u +%u)   # 1-5為週一至週五, 6為週六
+          DOW=$(date -u +%u)
           HOUR_UTC=$(date -u +%H)
           MODE="${{ github.event.inputs.task_mode }}"
 
           if [ "$MODE" = "backtest" ] || [ "$DOW" -eq 6 ]; then
-            echo "📈 執行每週六自動回測績效健檢 (backtest.py)..."
+            echo "📈 執行每週六 09:00 自動回測績效健檢 (backtest.py)..."
             python backtest.py
-          elif [ "$MODE" = "screener" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$HOUR_UTC" -ge 12 ]; then
+          elif [ "$MODE" = "screener" ] || [ "$HOUR_UTC" -ge 12 ]; then
             echo "📌 執行晚間 21:00 選股與極簡通知 (screener.py)..."
             python screener.py
           else
@@ -57,12 +57,12 @@ jobs:
             python monitor.py
           fi
 
-      - name: 4. 同步寫回最新選股、持倉與週六回測數據 (供 Gemini 同步讀取)
+      - name: 4. 同步寫回最新選股、持倉、季度成分股與週六回測數據
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
-          touch latest_report.json active_positions.json latest_backtest.json
-          git add latest_report.json active_positions.json latest_backtest.json || true
+          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json
+          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json || true
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
             git pull --rebase origin main || true
