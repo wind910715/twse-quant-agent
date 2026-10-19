@@ -578,7 +578,7 @@
     "ma5": 92.7,
     "ma10": 90.36,
     "suggested_lots": 7,
-    "remaining_lots": 7,
+    "remaining_lots": 0,
     "capital_used": 703500,
     "capital_pct": 23.4,
     "max_loss_twd": 26267,
@@ -586,7 +586,7 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING",
+    "status": "STOPPED_OUT",
     "highest_price": 104.0
   },
   {
