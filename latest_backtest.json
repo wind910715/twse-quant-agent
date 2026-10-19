@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-10-19 00:04:32",
+  "generated_at": "2026-10-19 06:54:23",
   "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股",
-  "total_trades": 27,
-  "win_rate": 59.3,
-  "rr_ratio": 2.83,
-  "avg_win_pct": 8.31,
+  "total_trades": 31,
+  "win_rate": 61.3,
+  "rr_ratio": 2.51,
+  "avg_win_pct": 7.39,
   "avg_loss_pct": -2.94,
-  "cum_return_pct": 40.62,
-  "mdd_pct": -3.55,
+  "cum_return_pct": 42.83,
+  "mdd_pct": -5.5,
   "by_strategy": {
     "S0_VCP收斂": {
       "trades": 5,
@@ -22,7 +22,7 @@
     "S2_主升段3浪": {
       "trades": 5,
       "win_rate": 60.0,
-      "avg_return_pct": 6.42
+      "avg_return_pct": 6.57
     },
     "S3_破底翻2B": {
       "trades": 13,
@@ -35,9 +35,9 @@
       "avg_return_pct": 12.56
     },
     "S5_法人量價共振": {
-      "trades": 1,
-      "win_rate": 0.0,
-      "avg_return_pct": -3.0
+      "trades": 5,
+      "win_rate": 60.0,
+      "avg_return_pct": 0.15
     }
   }
 }
