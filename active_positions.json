@@ -32,7 +32,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 244.0
   },
   {
     "stock_id": "3017",
@@ -67,7 +68,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 3315.0
   },
   {
     "stock_id": "6285",
@@ -102,7 +104,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 255.0
   },
   {
     "stock_id": "2609",
@@ -137,7 +140,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 65.0
   },
   {
     "stock_id": "2618",
@@ -150,7 +154,8 @@
     "target_price": 47.38,
     "suggested_lots": 14,
     "top_smart_broker": "法人籌碼集中",
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 43.7
   },
   {
     "stock_id": "2881",
@@ -177,7 +182,7 @@
     "ma5": 160.0,
     "ma10": 156.55,
     "suggested_lots": 4,
-    "remaining_lots": 4,
+    "remaining_lots": 0,
     "capital_used": 646000,
     "capital_pct": 21.5,
     "max_loss_twd": 8230,
@@ -185,7 +190,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "STOPPED_OUT",
+    "highest_price": 161.5
   },
   {
     "stock_id": "2882",
@@ -212,7 +218,7 @@
     "ma5": 114.2,
     "ma10": 112.9,
     "suggested_lots": 6,
-    "remaining_lots": 6,
+    "remaining_lots": 0,
     "capital_used": 696000,
     "capital_pct": 23.2,
     "max_loss_twd": 12480,
@@ -220,7 +226,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "STOPPED_OUT",
+    "highest_price": 116.5
   },
   {
     "stock_id": "5880",
@@ -255,7 +262,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 28.25
   },
   {
     "stock_id": "2368",
@@ -290,7 +298,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 1255.0
   },
   {
     "stock_id": "3034",
@@ -325,7 +334,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 592.0
   },
   {
     "stock_id": "2379",
@@ -360,7 +370,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 790.0
   },
   {
     "stock_id": "2313",
@@ -395,7 +406,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 248.0
   },
   {
     "stock_id": "2801",
@@ -430,7 +442,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 29.75
   },
   {
     "stock_id": "2027",
@@ -465,7 +478,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 51.1
   },
   {
     "stock_id": "9904",
@@ -492,7 +506,7 @@
     "ma5": 26.07,
     "ma10": 25.4,
     "suggested_lots": 28,
-    "remaining_lots": 28,
+    "remaining_lots": 0,
     "capital_used": 742000,
     "capital_pct": 24.7,
     "max_loss_twd": 5110,
@@ -500,7 +514,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "STOPPED_OUT",
+    "highest_price": 26.6
   },
   {
     "stock_id": "1326",
@@ -535,7 +550,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 78.7
   },
   {
     "stock_id": "6209",
@@ -570,7 +586,8 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "HOLDING",
+    "highest_price": 104.0
   },
   {
     "stock_id": "2377",
@@ -597,7 +614,7 @@
     "ma5": 158.1,
     "ma10": 156.6,
     "suggested_lots": 4,
-    "remaining_lots": 4,
+    "remaining_lots": 0,
     "capital_used": 645000,
     "capital_pct": 21.5,
     "max_loss_twd": 13345,
@@ -605,6 +622,7 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "reversal_alerted": false,
-    "status": "HOLDING"
+    "status": "STOPPED_OUT",
+    "highest_price": 161.25
   }
 ]
