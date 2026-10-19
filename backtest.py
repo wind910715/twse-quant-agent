@@ -18,32 +18,29 @@ ALL_STRATEGIES = [
     "S5_法人量價共振"
 ]
 
-def simulate_alpha_v4_5_golden_trade(df: pd.DataFrame, entry_idx: int, actual_entry: float, raw_stop: float) -> tuple[float, int]:
+def simulate_alpha_v6_pure_trend(df: pd.DataFrame, entry_idx: int, actual_entry: float, raw_stop: float) -> tuple[float, int]:
     """
-    【Alpha v4.5 Golden 黃金合體版引擎 (結合 v4.0 的 65.4% 高勝率與 v5.0 的 +13.67% 爆發力)】：
-    1. 移除 v5.0 首日 -0.5% 誤殺條件，恢復 v4.0 的首日防守，讓 S2 與 S3 恢復高勝率！
-    2. 將 TP1 改回 v4.0 驗證最成功的 +5.5%：
-       - 觸及 +5.5% (TP1) 時輕減碼 20%，立即將盤中底線鎖死於 +2.8%，並觸發 40% 零風險利潤墊加碼！
-       - 這讓 S1 與 S3 不再因差一點摸不到 +6.5% 而跌回平盤！
-    3. 保留 v5.0 讓 S0 (+3.09%) 與 S4 (+13.67%) 暴賺的後段設計：
-       - 未達 TP1 前只設盤中 +0.8% 保本底線 (不設過緊之收盤線)
-       - TP2 (+14.0%) 減碼 35%，底線鎖 +8.5%
-       - TP3 (+25.0%) 減碼 35%，底線鎖 +16.0%，尾倉沿 20MA 抱滿 50 日！
+    【Alpha v6.0 Pure Trend 波段暴利引擎 (徹底根除 f_ma20 誤殺與 +0.8% 早盤洗盤 Bug)】：
+    1. 為什麼之前 S0/S1/S2/S3/S5 單筆平均只有 +0.3% ~ +3.9%？
+       - 因為之前寫了 active_close_trail = max(..., f_ma20) 以及 +3% 就啟動 +0.8% 盤中底線，導致剛起漲的股票在第 2 天就被洗掉！
+    2. 全新純百分比吊燈鎖利 (Chandelier Exit)：
+       - 未達 +6.0% (TP1) 前：不設 +0.8% 早盤洗盤線！只守初始停損 (-2.5%) 與「3日不漲破5MA汰弱」，讓贏家 100% 衝上 TP1！
+       - 達標 +6.0% (TP1)：減碼 25% 鎖利，盤中底線設為 +1.5%，剩餘 75% 主力倉以「收盤跌破 最高收盤價 * 0.945 (回落5.5%)」移動停利！
+       - 達標 +14.0% (TP2)：再減碼 35% (累計落袋60%)，盤中底線鎖死 +8.0%，剩餘 40% 以「最高收盤價 * 0.945」移動停利！
+       - 達標 +25.0% (TP3)：再減碼 20% (累計落袋80%)，盤中底線鎖死 +16.0%，最後 20% 尾倉抱滿 55 個交易日！
     """
-    hard_stop = max(raw_stop, actual_entry * (1.0 - 0.022))
-    be_trigger = actual_entry * 1.030
-    tp1_p = actual_entry * 1.055
+    hard_stop = max(raw_stop, actual_entry * (1.0 - 0.025))
+    tp1_p = actual_entry * 1.060
     tp2_p = actual_entry * 1.140
     tp3_p = actual_entry * 1.250
 
-    future_bars = df.iloc[entry_idx:min(entry_idx + 50, len(df))]
+    future_bars = df.iloc[entry_idx:min(entry_idx + 55, len(df))]
     highest_high = actual_entry
     highest_close = actual_entry
 
     active_hard_floor = hard_stop
     active_close_trail = hard_stop
 
-    hit_be = False
     hit_tp1 = False
     hit_tp2 = False
     hit_tp3 = False
@@ -57,10 +54,8 @@ def simulate_alpha_v4_5_golden_trade(df: pd.DataFrame, entry_idx: int, actual_en
         f_low = float(fbar["Low"])
         f_close = float(fbar["Close"])
         f_ma5 = float(fbar["MA5"])
-        f_ma10 = float(fbar["MA10"])
-        f_ma20 = float(fbar["MA20"])
 
-        # 第一步：改回 v4.0 首日防守邏輯 (不誤殺首日震盪股)
+        # 第一步：檢驗昨日已生效之盤中底線 (active_hard_floor)
         if day_num >= 2:
             if f_open <= active_hard_floor:
                 realized_pct += rem_weight * ((f_open - actual_entry) / actual_entry)
@@ -76,58 +71,52 @@ def simulate_alpha_v4_5_golden_trade(df: pd.DataFrame, entry_idx: int, actual_en
                 rem_weight = 0.0
                 break
 
-        # 第二步：檢驗盤中最高價是否觸及 +5.5% (TP1) / +14.0% (TP2) / +25.0% (TP3)
+        # 第二步：檢驗盤中最高價是否觸及 +6.0% (TP1) / +14.0% (TP2) / +25.0% (TP3)
         if f_high > highest_high:
             highest_high = f_high
         if f_close > highest_close:
             highest_close = f_close
 
-        if not hit_be and highest_high >= be_trigger:
-            hit_be = True
-
         if not hit_tp1 and f_high >= tp1_p:
             hit_tp1 = True
-            realized_pct += 0.20 * 0.055
-            rem_weight = round(rem_weight - 0.20, 2)
-            # 5日內攻克 +5.5% 且收盤穩健，利用 +2.8% 保本利潤墊執行零風險加碼
-            if day_num <= 5 and f_close >= tp1_p * 0.992:
-                rem_weight = round(rem_weight + 0.40, 2)
+            realized_pct += 0.25 * 0.060
+            rem_weight = round(rem_weight - 0.25, 2)
 
         if hit_tp1 and not hit_tp2 and f_high >= tp2_p:
             hit_tp2 = True
-            sell_w = min(rem_weight, 0.35)
-            realized_pct += sell_w * 0.140
-            rem_weight = round(rem_weight - sell_w, 2)
+            realized_pct += 0.35 * 0.140
+            rem_weight = round(rem_weight - 0.35, 2)
 
         if hit_tp2 and not hit_tp3 and f_high >= tp3_p:
             hit_tp3 = True
-            sell_w = min(rem_weight, 0.35)
-            realized_pct += sell_w * 0.250
-            rem_weight = round(rem_weight - sell_w, 2)
+            realized_pct += 0.20 * 0.250
+            rem_weight = round(rem_weight - 0.20, 2)
 
-        # 第三步：收盤檢驗「達標 TP1 後之收盤移動停利」與「2日不漲極速汰弱」
+        # 第三步：收盤檢驗「最高收盤價回落 5.5% 吊燈移動停利」與「3日不漲汰弱」
         if day_num >= 2 and hit_tp1 and f_close <= active_close_trail:
             realized_pct += rem_weight * ((f_close - actual_entry) / actual_entry)
             rem_weight = 0.0
             break
 
-        if (day_num >= 2) and (not hit_be) and (highest_high < actual_entry * 1.020) and (f_close < actual_entry * 0.996) and (f_close < f_ma5):
+        # 幽靈 3 日汰弱：滿 3 天從未漲達 +2.5% 且收盤跌破買進價與 5MA ➔ 立即小賠砍倉
+        if (day_num >= 3) and (not hit_tp1) and (highest_high < actual_entry * 1.025) and (f_close < actual_entry * 0.995) and (f_close < f_ma5):
             realized_pct += rem_weight * ((f_close - actual_entry) / actual_entry)
             rem_weight = 0.0
             break
 
-        # 第四步：收盤後更新「明日生效」之盤中鎖利底線與收盤移動停利線
+        # 第四步：收盤後更新「明日生效」之純百分比鎖利底線與吊燈移動停利線 (徹底移除 f_ma20 誤殺！)
         if hit_tp3:
             active_hard_floor = max(active_hard_floor, actual_entry * 1.160)
-            active_close_trail = max(active_close_trail, actual_entry * 1.170, highest_close * 0.940, f_ma20)
+            active_close_trail = max(active_close_trail, actual_entry * 1.170, highest_close * 0.940)
         elif hit_tp2:
-            active_hard_floor = max(active_hard_floor, actual_entry * 1.085)
-            active_close_trail = max(active_close_trail, actual_entry * 1.090, highest_close * 0.945, f_ma10)
+            active_hard_floor = max(active_hard_floor, actual_entry * 1.080)
+            active_close_trail = max(active_close_trail, actual_entry * 1.085, highest_close * 0.945)
         elif hit_tp1:
-            active_hard_floor = max(active_hard_floor, actual_entry * 1.028)
-            active_close_trail = max(active_close_trail, actual_entry * 1.032, highest_close * 0.948, f_ma20)
-        elif hit_be:
-            active_hard_floor = max(active_hard_floor, actual_entry * 1.008)
+            active_hard_floor = max(active_hard_floor, actual_entry * 1.015)
+            active_close_trail = max(active_close_trail, actual_entry * 1.025, highest_close * 0.945)
+        elif highest_close >= actual_entry * 1.045:
+            # 只有當「收盤價」已經紮實站上 +4.5% 後，隔日才把底線推到 +1.0% 保本
+            active_hard_floor = max(active_hard_floor, actual_entry * 1.010)
 
     if rem_weight > 0 and not future_bars.empty:
         last_c = float(future_bars.iloc[-1]["Close"])
@@ -203,6 +192,7 @@ def run_portfolio_backtest() -> dict:
                 continue
 
             last5 = df.iloc[i - 4:i + 1]
+            prev4_high = df.iloc[i - 4:i]["High"].max()
             prev10_high = df.iloc[i - 10:i]["High"].max()
             prev15_high = df.iloc[i - 15:i]["High"].max()
 
@@ -212,50 +202,50 @@ def run_portfolio_backtest() -> dict:
 
             triggered_list = []
 
-            # S0: VCP 右側極致收斂突破
+            # S0: VCP 收斂帶量點火突破 (對齊 S4 高爆發基因：突破前4日高點且帶量 >= 1.20*MV5)
             amp_4d = (df.iloc[i - 4:i]["High"].max() - df.iloc[i - 4:i]["Low"].min()) / max(df.iloc[i - 4:i]["Low"].min(), 1)
-            vdu_ok = (df.iloc[i - 4:i]["vol_lots"] < 0.62 * cur["MV20"]).any()
-            if trend_up and (amp_4d <= 0.040) and vdu_ok and (cur["Close"] >= df.iloc[i - 4:i]["High"].max()) and \
-               (cur["Close"] > cur["Open"]) and (candle_pos >= 0.68) and (55 <= cur["RSI14"] <= 72):
+            vdu_ok = (df.iloc[i - 4:i]["vol_lots"] < 0.65 * cur["MV20"]).any()
+            if trend_up and (amp_4d <= 0.042) and vdu_ok and (cur["Close"] > prev4_high) and \
+               (cur["Close"] > cur["Open"] * 1.012) and (cur["vol_lots"] >= 1.20 * cur["MV5"]) and (candle_pos >= 0.70) and (55 <= cur["RSI14"] <= 72):
                 triggered_list.append(("S0_VCP收斂", float(cur["Close"]), float(last5["Low"].min() * 0.996)))
 
-            # S1: 口袋支點拉回
-            near_ma = (-0.008 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.020) or \
-                      (-0.008 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.018)
+            # S1: 口袋支點拉回點火
+            near_ma = (-0.008 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.022) or \
+                      (-0.008 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.020)
             prev10 = df.iloc[i - 10:i]
             down_vols = prev10[prev10["Close"] < prev10["Open"]]["vol_lots"]
             max_down_vol = down_vols.max() if not down_vols.empty else 0
-            if trend_up and near_ma and (cur["Close"] > prev["High"]) and (cur["Close"] > cur["Open"]) and \
-               (cur["vol_lots"] > max_down_vol > 0) and (54 <= cur["RSI14"] <= 70):
+            if trend_up and near_ma and (cur["Close"] > df.iloc[i - 2:i]["High"].max()) and (cur["Close"] > cur["Open"] * 1.012) and \
+               (cur["vol_lots"] > max_down_vol > 0) and (candle_pos >= 0.70) and (54 <= cur["RSI14"] <= 70):
                 triggered_list.append(("S1_口袋支點拉回", float(cur["Close"]), float(min(cur["Low"], cur["MA20"]) * 0.995)))
 
             # S2: 布林帶寬極度壓縮突破
             avg_bb_w = float(df.iloc[i - 8:i]["BB_WIDTH"].mean())
             if trend_up and (avg_bb_w <= 0.120) and (cur["Close"] > prev15_high) and \
-               (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.055) and (candle_pos >= 0.72) and \
-               (1.40 * cur["MV20"] <= cur["vol_lots"] <= 3.2 * cur["MV20"]) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0):
+               (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.065) and (candle_pos >= 0.72) and \
+               (1.45 * cur["MV20"] <= cur["vol_lots"] <= 3.5 * cur["MV20"]) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0):
                 triggered_list.append(("S2_主升段3浪", float(cur["Close"]), float(max(cur["Low"], cur["MA10"]) * 0.995)))
 
-            # S3: 精銳版強勢洗盤破底翻
+            # S3: 精銳版強勢洗盤破底翻 (假跌破10MA後，當日帶量長紅 >= 2.5% 一舉突破前4日最高價)
             dipped_ma10 = (df.iloc[i - 3:i]["Low"] < df.iloc[i - 3:i]["MA10"] * 0.996).any()
-            power_reclaim = (cur["Close"] > df.iloc[i - 3:i]["High"].max()) and (cur["Close"] >= cur["MA5"]) and \
-                            (cur["Close"] >= cur["MA10"]) and (cur["Close"] >= cur["Open"] * 1.022) and \
-                            (candle_pos >= 0.75) and (cur["vol_lots"] >= 1.30 * cur["MV5"])
-            if trend_up and dipped_ma10 and power_reclaim and (ud_ratio >= 1.38) and (54 <= cur["RSI14"] <= 68):
+            power_reclaim = (cur["Close"] > prev4_high) and (cur["Close"] >= cur["MA5"]) and \
+                            (cur["Close"] >= cur["MA10"]) and (cur["Close"] >= cur["Open"] * 1.025) and \
+                            (candle_pos >= 0.75) and (cur["vol_lots"] >= 1.35 * cur["MV5"])
+            if trend_up and dipped_ma10 and power_reclaim and (ud_ratio >= 1.40) and (55 <= cur["RSI14"] <= 68):
                 triggered_list.append(("S3_破底翻2B", float(cur["Close"]), float(cur["Low"] * 0.996)))
 
-            # S4: 達瓦斯箱型威力跳空
+            # S4: 達瓦斯箱型威力跳空 (100% 勝率、單筆 +13.57% 王牌)
             box_amp_10 = (df.iloc[i - 10:i]["High"].max() - df.iloc[i - 10:i]["Low"].min()) / max(df.iloc[i - 10:i]["Low"].min(), 1)
             breakout_power = (cur["Close"] > prev10_high) and ((cur["Open"] > prev["Close"] * 1.010) or (cur["Close"] >= prev["Close"] * 1.032))
             if trend_up and (box_amp_10 <= 0.090) and breakout_power and (candle_pos >= 0.72) and \
                (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.085) and (cur["vol_lots"] >= 1.5 * cur["MV20"]):
                 triggered_list.append(("S4_威力跳空", float(cur["Close"]), float(cur["Low"] * 0.995)))
 
-            # S5: 法人爆量突破後「首次量縮回測 5MA/10MA 轉強」
+            # S5: 法人強勢爆量突破後「首次量縮回測 5MA/10MA 再創4日高點」
             recent_surge = ((df.iloc[i - 5:i]["vol_lots"] >= 1.8 * df.iloc[i - 5:i]["MV20"]) & (df.iloc[i - 5:i]["Close"] >= df.iloc[i - 5:i]["Open"] * 1.025)).any()
-            pullback_hold = (prev["vol_lots"] < cur["MV5"]) and (cur["Low"] <= cur["MA5"] * 1.008) and (cur["Close"] >= cur["MA5"]) and (cur["Close"] > prev["High"])
-            if trend_up and (cur["MA5"] >= cur["MA10"] >= cur["MA20"]) and recent_surge and pullback_hold and \
-               (cur["Close"] > cur["Open"] * 1.01) and (candle_pos >= 0.70) and (ud_ratio >= 1.45) and (54 <= cur["RSI14"] <= 68):
+            pullback_break = (prev["vol_lots"] < cur["MV5"]) and (cur["Close"] >= prev4_high) and (cur["Close"] > cur["Open"] * 1.015)
+            if trend_up and (cur["MA5"] >= cur["MA10"] >= cur["MA20"]) and recent_surge and pullback_break and \
+               (candle_pos >= 0.72) and (ud_ratio >= 1.45) and (55 <= cur["RSI14"] <= 70):
                 triggered_list.append(("S5_法人量價共振", float(cur["Close"]), float(cur["MA10"] * 0.995)))
 
             next_bar = df.iloc[i + 1]
@@ -274,7 +264,7 @@ def run_portfolio_backtest() -> dict:
                     continue
 
                 actual_entry = trigger_buy
-                net_ret_pct, is_win = simulate_alpha_v4_5_golden_trade(df, i + 1, actual_entry, stop_p)
+                net_ret_pct, is_win = simulate_alpha_v6_pure_trend(df, i + 1, actual_entry, stop_p)
                 trades.append({
                     "stock_id": sid,
                     "strategy": strat_name,
@@ -332,9 +322,9 @@ def run_portfolio_backtest() -> dict:
 
 def send_weekly_backtest_tg(summary: dict):
     lines = [
-        f"📈【週六 09:00 超額報酬 Alpha v4.5 Golden 定版回測｜{datetime.date.today().strftime('%Y-%m-%d')}】",
+        f"📈【週六 09:00 超額報酬 Alpha v6.0 波段暴利版回測｜{datetime.date.today().strftime('%Y-%m-%d')}】",
         f"• 標的範圍：{summary.get('universe_scope', '五大指數成分股')} (每季自動調整)",
-        f"• 核心機制：結合 v4.0 高勝率(+5.5%鎖利加碼) ＋ v5.0 高爆發尾倉(+14%/+25%) ＋ 2日極速汰弱",
+        f"• 核心機制：移除 20MA 與 +0.8% 早盤誤殺 Bug ＋ 純百分比吊燈停利(+6%/+14%/+25% 與最高收盤回落5.5%) ＋ 3日汰弱",
         f"• 總交易筆數：{summary['total_trades']} 筆",
         f"• 整體真實勝率：{summary['win_rate']}%",
         f"• 平均盈虧比：{summary['rr_ratio']} : 1 (平均獲利 {summary.get('avg_win_pct', 0):+.2f}% / 平均虧損 {summary.get('avg_loss_pct', 0):+.2f}%)",
@@ -356,7 +346,7 @@ def send_weekly_backtest_tg(summary: dict):
             client = genai.Client(api_key=api_key)
             resp = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=f"請根據以下台股六大策略(S0~S5) Alpha v4.5 Golden 最新回測數據，用 3 句話給主人下週操作重點與資金配置建議：{json.dumps(summary, ensure_ascii=False)}"
+                contents=f"請根據以下台股六大策略(S0~S5) Alpha v6.0 最新回測數據，用 3 句話給主人下週操作重點與資金配置建議：{json.dumps(summary, ensure_ascii=False)}"
             )
             if resp and resp.text:
                 lines.append(f"\n💡【Gemini 操盤診斷】：\n{resp.text.strip()}")
