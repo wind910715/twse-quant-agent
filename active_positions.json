@@ -39,12 +39,12 @@
     "max_loss_twd": 28837,
     "entered_intraday": false,
     "entry_alerted": false,
-    "invalidated_alerted": false,
+    "invalidated_alerted": true,
     "be_locked": false,
     "tp1_alerted": false,
     "tp2_alerted": false,
     "tp3_alerted": false,
-    "status": "WATCHING"
+    "status": "INVALIDATED_NO_ENTRY"
   },
   {
     "stock_id": "4961",
