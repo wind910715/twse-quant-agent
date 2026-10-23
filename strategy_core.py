@@ -34,17 +34,11 @@ CONFIG = {
     "MAX_HOLD_DAYS": 55,
 }
 
-# v3.1 決策: S5_強勢回檔反彈 在 9 個月資料 + 一次放寬後仍 0 觸發, 無任何證據支持上線,
-# 預設停用 (程式保留)。重新啟用條件: 先用更長期間 (2 年+) 做 shadow 統計且期望值為正。
-# v3.2 決策 (使用者標準: 只留「小賠大賺」與「小賠小賺」兩種型態, 以期望值/賺賠比取捨):
-#   留: S0 (賺賠比 2.91, 小賠大賺) / S3 (勝率 63.6%, 小賠小賺) / S4 (shadow 平均 +4.66%, 升格觀察)
-#   停用觀察: S1 (僅 1 筆, 無證據) / S2 (勝率 20%, 賺賠比 7.55 僅靠單筆贏家, 證據不足)
-#   重新啟用條件: 離線回測 (實驗腳本可 discard 本集合) 累積足夠樣本且期望值為正、型態符合標準。
-DISABLED_STRATEGIES = {"S5_強勢回檔反彈", "S1_口袋支點拉回", "S2_主升段3浪"}
-
+# v3.3 決策 (使用者指示): 不適用策略直接刪除, 只留通過標準者 (小賠大賺/小賠小賺, 期望值為正)。
+#   現行: S0 VCP收斂 (賺賠比 2.91) / S3 破底翻2B (勝率 63.6%) / S4 威力跳空 (升格觀察)。
+#   已刪除: S1 口袋支點拉回、S2 主升段3浪、S5 強勢回檔反彈 (理由見 CHANGES_V32.md / CHANGES_V33.md)。
 STRATEGY_NAMES = [
-    "S0_VCP收斂", "S1_口袋支點拉回", "S2_主升段3浪",
-    "S3_破底翻2B", "S4_威力跳空", "S5_強勢回檔反彈",
+    "S0_VCP收斂", "S3_破底翻2B", "S4_威力跳空",
 ]
 
 
@@ -298,28 +292,6 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(last5["Low"].min() * 0.996, entry * 0.975)), 2)
         matched.append(("S0_VCP收斂", entry, stop))
 
-    # S1: 口袋支點拉回點火
-    near_ma = (-0.008 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.022) or \
-              (-0.008 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.020)
-    prev10 = df.iloc[-11:-1]
-    down_vols = prev10[prev10["Close"] < prev10["Open"]]["vol_lots"]
-    max_down_vol = down_vols.max() if not down_vols.empty else 0
-    if trend_up and near_ma and (cur["Close"] > df.iloc[-3:-1]["High"].max()) and \
-       (cur["Close"] > cur["Open"] * 1.012) and (cur["vol_lots"] > max_down_vol > 0) and \
-       (candle_pos >= 0.70) and (54 <= cur["RSI14"] <= 70):
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.995, entry * 0.975)), 2)
-        matched.append(("S1_口袋支點拉回", entry, stop))
-
-    # S2: 布林帶寬極度壓縮突破 (策略名: 主升段3浪)
-    avg_bb_w = float(df.iloc[-9:-1]["BB_WIDTH"].mean())
-    if trend_up and (avg_bb_w <= 0.120) and (cur["Close"] > prev_15_high) and \
-       (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.065) and (candle_pos >= 0.72) and \
-       (1.45 * cur["MV20"] <= cur["vol_lots"] <= 3.5 * cur["MV20"]) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0):
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"], cur["MA10"]) * 0.995), 2)
-        matched.append(("S2_主升段3浪", entry, stop))
-
     # S3: 強勢洗盤破底翻 (2B)
     dipped_ma10 = (df.iloc[-4:-1]["Low"] < df.iloc[-4:-1]["MA10"] * 0.996).any()
     power_reclaim = (cur["Close"] > prev_4_high) and (cur["Close"] >= cur["MA5"]) and \
@@ -340,26 +312,6 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
         matched.append(("S4_威力跳空", entry, stop))
 
-    # S5 (v3 汰換): 強勢回檔反彈 — 取代原「法人量價共振/N字回測」。
-    # 原 S5 實測 (v2): 勝率 66.7% 但平均報酬 -0.42%, 期望值為負, 且型態與 S1 高度重疊、名稱與內容不符。
-    # 新 S5 與其他策略互補: S0/S2/S4 買突破、S3 買強勢洗盤收復, S5 買「上升趨勢中短線超跌後的第一根轉強K」,
-    # 進場點更早、停損更近 (貼 MA20), 用 RSI 短線冷卻 + 今日轉強確認, 不追突破高點。
-    high_10d = df.iloc[-11:-1]["High"].max()
-    low_3d_min = df.iloc[-4:-1]["Low"].min()
-    pullback_depth = (high_10d - low_3d_min) / max(high_10d, 1)
-    rsi_cooled = (df.iloc[-4:-1]["RSI14"] <= 50).any()
-    touched_support = (df.iloc[-4:-1]["Low"] <= df.iloc[-4:-1]["MA10"] * 1.005).any()
-    rebound_k = (cur["Close"] > cur["Open"] * 1.008) and (cur["Close"] > prev["Close"] * 1.008) and \
-                (cur["Close"] >= cur["MA5"]) and (candle_pos >= 0.60) and \
-                (cur["RSI14"] > prev["RSI14"]) and (45 <= cur["RSI14"] <= 62) and \
-                (cur["vol_lots"] >= 0.85 * cur["MV5"])
-    if trend_up and (cur["MA10"] > cur["MA20"]) and (0.015 <= pullback_depth <= 0.075) and \
-       rsi_cooled and touched_support and rebound_k and (ud_vol_ratio >= 1.30):
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.995, entry * 0.975)), 2)
-        matched.append(("S5_強勢回檔反彈", entry, stop))
-
-    matched = [m for m in matched if m[0] not in DISABLED_STRATEGIES]
     results = []
     trade_d = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])
     ex_prefix = "otc" if sfx == ".TWO" else "tse"
