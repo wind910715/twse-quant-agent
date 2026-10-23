@@ -57,6 +57,7 @@ def run_portfolio_backtest() -> dict:
         bench_df["B_RET20"] = bench_df["Close"].pct_change(20)
 
     trades = []
+    shadow_trades = []  # v3: 同日同股的次要策略訊號也做影子模擬統計 (不占組合資金), 避免像 S4 被優先序吞掉而看不見表現
     censored_count = 0
     skipped_portfolio_full = 0
     skipped_stock_busy = 0
@@ -134,11 +135,28 @@ def run_portfolio_backtest() -> dict:
             })
             open_positions.append({"stock_id": sid, "entry_date": entry_date, "exit_date": exit_date})
 
+            # v3 shadow: 次要策略僅統計, 用同一套隔日進場確認與出場模擬
+            for extra in sigs[1:]:
+                e_stop = extra["hard_stop"]
+                if n_open > extra["entry_price"] * 1.028 or n_open <= e_stop:
+                    continue
+                e_trigger = round(max(extra["entry_price"], n_open * 1.003), 2)
+                if n_high < e_trigger or n_close < n_open * 0.998:
+                    continue
+                e_res = simulate_exit(df, i + 1, e_trigger, e_stop)
+                if e_res["censored"]:
+                    continue
+                shadow_trades.append({
+                    "strategy": extra["strategy"],
+                    "net_return_pct": e_res["net_ret_pct"],
+                    "win": e_res["win"],
+                })
+
     df_t = pd.DataFrame(trades)
     if df_t.empty:
         summary = {
             "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "version": "v2_unified_core", "total_trades": 0, "win_rate": 0.0,
+            "version": "v3_strategy_optimization", "total_trades": 0, "win_rate": 0.0,
             "rr_ratio": 0.0, "mdd_pct": 0.0, "cum_return_pct": 0.0, "by_strategy": {},
             "period_split": {"first_half": summarize_rows([]), "second_half": summarize_rows([])},
             "censored_trades_excluded": censored_count,
@@ -176,7 +194,7 @@ def run_portfolio_backtest() -> dict:
 
     summary = {
         "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "v2_unified_core",
+        "version": "v3_strategy_optimization",
         "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股 (目前名單, 非 point-in-time)",
         "total_trades": int(len(df_t)),
         "win_rate": round(float(df_t["win"].mean() * 100), 1),
@@ -186,6 +204,7 @@ def run_portfolio_backtest() -> dict:
         "cum_return_pct": round(float(equity_curve.iloc[-1] - 100.0), 2),
         "mdd_pct": round(float(dd.min()), 2),
         "by_strategy": by_strat,
+        "shadow_by_strategy": {s: summarize_rows([t for t in shadow_trades if t["strategy"] == s]) for s in ALL_STRATEGIES},
         "period_split": period_split,
         "censored_trades_excluded": censored_count,
         "skipped_portfolio_full": skipped_portfolio_full,

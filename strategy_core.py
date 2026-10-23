@@ -34,9 +34,13 @@ CONFIG = {
     "MAX_HOLD_DAYS": 55,
 }
 
+# v3.1 決策: S5_強勢回檔反彈 在 9 個月資料 + 一次放寬後仍 0 觸發, 無任何證據支持上線,
+# 預設停用 (程式保留)。重新啟用條件: 先用更長期間 (2 年+) 做 shadow 統計且期望值為正。
+DISABLED_STRATEGIES = {"S5_強勢回檔反彈"}
+
 STRATEGY_NAMES = [
     "S0_VCP收斂", "S1_口袋支點拉回", "S2_主升段3浪",
-    "S3_破底翻2B", "S4_威力跳空", "S5_法人量價共振",
+    "S3_破底翻2B", "S4_威力跳空", "S5_強勢回檔反彈",
 ]
 
 
@@ -282,6 +286,7 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     # S0: VCP 收斂帶量點火突破
     amp_4d = (df.iloc[-5:-1]["High"].max() - df.iloc[-5:-1]["Low"].min()) / max(df.iloc[-5:-1]["Low"].min(), 1)
     vdu_ok = (df.iloc[-5:-1]["vol_lots"] < 0.65 * cur["MV20"]).any()
+    # v3.1: 量縮收緊與 MA20 延伸上限經回測證實有害 (S0 交易 5->1, S3 11->2, 後半段轉負), 已退回 v2 條件。
     if trend_up and (amp_4d <= 0.042) and vdu_ok and (cur["Close"] > prev_4_high) and \
        (cur["Close"] > cur["Open"] * 1.012) and (cur["vol_lots"] >= 1.20 * cur["MV5"]) and \
        (candle_pos >= 0.70) and (55 <= cur["RSI14"] <= 72):
@@ -331,18 +336,26 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
         matched.append(("S4_威力跳空", entry, stop))
 
-    # S5: 強勢股 N 字回測 10MA 黃金轉折 (原名「法人量價共振」並非法⼈專屬條件, 法人僅為全策略共用濾網)
-    high_15d = df.iloc[-16:-2]["High"].max()
-    pullback_from_peak = (0.025 <= (high_15d - cur["Close"]) / max(high_15d, 1) <= 0.075)
-    touched_ma10 = (cur["Low"] <= cur["MA10"] * 1.008) or (prev["Low"] <= prev["MA10"] * 1.008)
-    turn_up_k = (cur["Close"] >= cur["MA5"]) and (cur["Close"] >= cur["MA10"]) and \
-                (cur["Close"] > prev["High"]) and (cur["Close"] > cur["Open"] * 1.012) and (candle_pos >= 0.70)
-    if trend_up and (cur["MA10"] > cur["MA20"]) and pullback_from_peak and touched_ma10 and turn_up_k and \
-       (ud_vol_ratio >= 1.40) and (52 <= cur["RSI14"] <= 66):
+    # S5 (v3 汰換): 強勢回檔反彈 — 取代原「法人量價共振/N字回測」。
+    # 原 S5 實測 (v2): 勝率 66.7% 但平均報酬 -0.42%, 期望值為負, 且型態與 S1 高度重疊、名稱與內容不符。
+    # 新 S5 與其他策略互補: S0/S2/S4 買突破、S3 買強勢洗盤收復, S5 買「上升趨勢中短線超跌後的第一根轉強K」,
+    # 進場點更早、停損更近 (貼 MA20), 用 RSI 短線冷卻 + 今日轉強確認, 不追突破高點。
+    high_10d = df.iloc[-11:-1]["High"].max()
+    low_3d_min = df.iloc[-4:-1]["Low"].min()
+    pullback_depth = (high_10d - low_3d_min) / max(high_10d, 1)
+    rsi_cooled = (df.iloc[-4:-1]["RSI14"] <= 50).any()
+    touched_support = (df.iloc[-4:-1]["Low"] <= df.iloc[-4:-1]["MA10"] * 1.005).any()
+    rebound_k = (cur["Close"] > cur["Open"] * 1.008) and (cur["Close"] > prev["Close"] * 1.008) and \
+                (cur["Close"] >= cur["MA5"]) and (candle_pos >= 0.60) and \
+                (cur["RSI14"] > prev["RSI14"]) and (45 <= cur["RSI14"] <= 62) and \
+                (cur["vol_lots"] >= 0.85 * cur["MV5"])
+    if trend_up and (cur["MA10"] > cur["MA20"]) and (0.015 <= pullback_depth <= 0.075) and \
+       rsi_cooled and touched_support and rebound_k and (ud_vol_ratio >= 1.30):
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.995, entry * 0.975)), 2)
-        matched.append(("S5_法人量價共振", entry, stop))
+        matched.append(("S5_強勢回檔反彈", entry, stop))
 
+    matched = [m for m in matched if m[0] not in DISABLED_STRATEGIES]
     results = []
     trade_d = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])
     ex_prefix = "otc" if sfx == ".TWO" else "tse"
