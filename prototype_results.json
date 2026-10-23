@@ -1,0 +1,104 @@
+{
+  "generated_at": "2026-10-23 16:12:26",
+  "prototypes": {
+    "P1_RSI2": {
+      "n": 2100,
+      "win": 49.0,
+      "avg": -0.09,
+      "median": -0.14,
+      "avg_win": 4.78,
+      "avg_loss": -4.75,
+      "rr": 1.01
+    },
+    "P1b_BB穿透": {
+      "n": 472,
+      "win": 50.4,
+      "avg": 0.5,
+      "median": 0.07,
+      "avg_win": 5.69,
+      "avg_loss": -4.78,
+      "rr": 1.19
+    },
+    "BASE_趨勢內5日持有": {
+      "n": 7752,
+      "win": 48.6,
+      "avg": 0.79,
+      "median": -0.22,
+      "avg_win": 7.64,
+      "avg_loss": -5.68,
+      "rr": 1.35
+    },
+    "P2_PEAD_top30_hold20": {
+      "n": 787,
+      "win": 35.3,
+      "avg": 1.09,
+      "median": -8.54,
+      "avg_win": 17.03,
+      "avg_loss": -7.62,
+      "rr": 2.24
+    },
+    "BASE_全部事件_hold20": {
+      "n": 7035,
+      "win": 35.5,
+      "avg": 0.41,
+      "median": -4.47,
+      "avg_win": 13.99,
+      "avg_loss": -7.06,
+      "rr": 1.98
+    },
+    "P2_PEAD_top30_hold40": {
+      "n": 787,
+      "win": 32.7,
+      "avg": 3.85,
+      "median": -8.54,
+      "avg_win": 28.61,
+      "avg_loss": -8.15,
+      "rr": 3.51
+    },
+    "BASE_全部事件_hold40": {
+      "n": 7035,
+      "win": 34.3,
+      "avg": 2.57,
+      "median": -8.54,
+      "avg_win": 22.83,
+      "avg_loss": -8.01,
+      "rr": 2.85
+    },
+    "P2_PEAD_top30_hold60": {
+      "n": 787,
+      "win": 29.4,
+      "avg": 5.14,
+      "median": -8.54,
+      "avg_win": 37.48,
+      "avg_loss": -8.3,
+      "rr": 4.52
+    },
+    "BASE_全部事件_hold60": {
+      "n": 7035,
+      "win": 31.7,
+      "avg": 3.77,
+      "median": -8.54,
+      "avg_win": 29.7,
+      "avg_loss": -8.26,
+      "rr": 3.59
+    },
+    "P3_RS線突破": {
+      "n": 247,
+      "win": 42.9,
+      "avg": 3.53,
+      "median": -2.05,
+      "avg_win": 14.38,
+      "avg_loss": -4.63,
+      "rr": 3.11
+    },
+    "P3對照_無RS突破": {
+      "n": 546,
+      "win": 42.3,
+      "avg": 3.67,
+      "median": -1.58,
+      "avg_win": 14.15,
+      "avg_loss": -4.01,
+      "rr": 3.53
+    }
+  }
+}
