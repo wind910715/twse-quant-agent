@@ -1,43 +1,64 @@
 {
-  "generated_at": "2026-10-19 06:54:23",
-  "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股",
-  "total_trades": 31,
-  "win_rate": 61.3,
-  "rr_ratio": 2.51,
-  "avg_win_pct": 7.39,
-  "avg_loss_pct": -2.94,
-  "cum_return_pct": 42.83,
-  "mdd_pct": -5.5,
+  "generated_at": "2026-10-23 20:04:28",
+  "version": "v2_unified_core",
+  "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股 (目前名單, 非 point-in-time)",
+  "total_trades": 25,
+  "win_rate": 52.0,
+  "rr_ratio": 1.84,
+  "avg_win_pct": 6.13,
+  "avg_loss_pct": -3.33,
+  "cum_return_pct": 8.01,
+  "mdd_pct": -3.78,
   "by_strategy": {
     "S0_VCP收斂": {
       "trades": 5,
       "win_rate": 40.0,
-      "avg_return_pct": 3.06
+      "avg_return_pct": 2.41
     },
     "S1_口袋支點拉回": {
       "trades": 1,
       "win_rate": 100.0,
-      "avg_return_pct": 2.49
+      "avg_return_pct": 2.04
     },
     "S2_主升段3浪": {
       "trades": 5,
-      "win_rate": 60.0,
-      "avg_return_pct": 6.57
+      "win_rate": 20.0,
+      "avg_return_pct": 1.53
     },
     "S3_破底翻2B": {
-      "trades": 13,
-      "win_rate": 61.5,
-      "avg_return_pct": 2.2
+      "trades": 11,
+      "win_rate": 63.6,
+      "avg_return_pct": 1.75
     },
     "S4_威力跳空": {
-      "trades": 2,
-      "win_rate": 100.0,
-      "avg_return_pct": 12.56
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_return_pct": 0.0
     },
     "S5_法人量價共振": {
-      "trades": 5,
-      "win_rate": 60.0,
-      "avg_return_pct": 0.15
+      "trades": 3,
+      "win_rate": 66.7,
+      "avg_return_pct": -0.42
     }
-  }
+  },
+  "period_split": {
+    "first_half": {
+      "trades": 12,
+      "win_rate": 66.7,
+      "avg_return_pct": 2.78
+    },
+    "second_half": {
+      "trades": 13,
+      "win_rate": 38.5,
+      "avg_return_pct": 0.49
+    }
+  },
+  "censored_trades_excluded": 4,
+  "skipped_portfolio_full": 0,
+  "skipped_stock_busy": 1,
+  "max_concurrent_positions": 5,
+  "slot_weight_pct": 20.0,
+  "chip_filter_applied": false,
+  "universe_point_in_time": false,
+  "notes": "回測與實盤共用 strategy_core.evaluate_candidate; 法人濾網未套用 (無歷史資料); 名單為目前成分股, 仍有倖存者偏誤, 數字僅供相對比較。"
 }

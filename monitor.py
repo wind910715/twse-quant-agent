@@ -191,6 +191,8 @@ def check_positions_once() -> bool:
             pos["highest_price"] = highest_p
             modified = True
 
+        # 註: 盤中移動停利以即時價對 dynamic_trailing_stop 判斷; backtest 以收盤價近似,
+        # 兩者觸發時點會有差異, 解讀回測 TP/trail 表現時需保留此誤差。
         trail_stop = pos.get("dynamic_trailing_stop", pos["hard_stop"])
 
         # 1. 檢驗是否跌破防守底線 / 吊燈移動停利
@@ -239,9 +241,14 @@ def check_positions_once() -> bool:
             continue
 
         # 4. 波段目標價 (TP3: +25.0%)
+        # v2: 賣出張數以 screener 出場計畫的 tp3_reduce_lots 為準 (SSOT),
+        # 不再用「剩餘 50%」推測 (小張數時會與計畫不符)。舊持倉無此欄位才退回舊算法。
         if live >= pos.get("tp3_price", 999999) and not pos.get("tp3_alerted", False):
             pos["tp3_alerted"] = True
-            sell_lots = max(1, int(round(rem_lots * 0.50)))
+            if pos.get("tp3_reduce_lots"):
+                sell_lots = min(rem_lots, int(pos["tp3_reduce_lots"]))
+            else:
+                sell_lots = max(1, int(round(rem_lots * 0.50)))
             pos["remaining_lots"] = max(0, rem_lots - sell_lots)
             pos["dynamic_trailing_stop"] = round(max(entry_p * 1.160, highest_p * 0.940), 2)
             modified = True

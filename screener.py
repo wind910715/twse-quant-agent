@@ -6,22 +6,12 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-# ==========================================
-# 1. 全局風控與【Alpha v7.0 證交所即時串聯定版】設定 (SSOT)
-# ==========================================
-CONFIG = {
-    "ACCOUNT_EQUITY": 3_000_000,   # 預設總資金 300 萬元
-    "RISK_PER_TRADE": 0.012,       # 單筆最大容許虧損 1.2% (36,000 元)
-    "MAX_POS_RATIO": 0.35,         # 單筆最大持倉上限 35% (105 萬元)
-    "MIN_MV20_LOTS": 1000,         # 20日均量門檻 >= 1,000 張
-    "MIN_PRICE": 25.0,             # 最低股價門檻 >= 25 元
-    "MAX_STOP_PCT": 0.026,         # 初始硬性停損上限 -2.6% (拒絕設太窄被誤洗，也拒絕過寬大賠)
-    "MIN_STOP_PCT": 0.018,         # 初始硬性停損下限 -1.8% (防止像9904寶成只跌-0.75%就被誤洗出場)
-    # 純百分比三階停利與最高收盤回落吊燈停利
-    "TP1_TARGET_PCT": 0.060,       # 停利一 (TP1)：+6.0% 減碼 25%，底線鎖 +1.5%，餘部75%以「最高收盤回落5.5%」移動停利
-    "TP2_TARGET_PCT": 0.140,       # 停利二 (TP2)：+14.0% 再減碼 35%，底線鎖 +8.0%，餘部40%以「最高收盤回落5.5%」移動停利
-    "TP3_TARGET_PCT": 0.250,       # 停利三 (TP3)：+25.0% 再減碼 20%，底線鎖 +16.0%，尾倉20%以「最高收盤回落6.0%」抱到底
-}
+# v2: 策略邏輯/指標/部位/出場計畫全部來自 strategy_core (與 backtest 共用同一份, SSOT)
+from strategy_core import (
+    CONFIG, STRATEGY_NAMES, calc_rsi, calc_up_down_vol_ratio, calc_volume_poc_and_max_bar,
+    calc_cdp_levels, calc_position_size, calc_exit_plan as calc_pct_trailing_exit_plan,
+    prepare_indicators, chip_is_positive, market_regime_ok, evaluate_candidate,
+)
 
 POSITIONS_FILE = "active_positions.json"
 REPORT_FILE = "latest_report.json"
@@ -115,291 +105,7 @@ def build_dynamic_index_universe() -> dict:
 
     return universe
 
-def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0.0).ewm(alpha=1/period, adjust=False).mean()
-    loss = (-delta.where(delta < 0, 0.0)).ewm(alpha=1/period, adjust=False).mean()
-    rs = gain / loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
-
-def calc_up_down_vol_ratio(df_10: pd.DataFrame) -> float:
-    up_days = df_10[df_10["Close"] >= df_10["Open"]]["vol_lots"]
-    down_days = df_10[df_10["Close"] < df_10["Open"]]["vol_lots"]
-    up_avg = float(up_days.mean()) if not up_days.empty else 1.0
-    down_avg = float(down_days.mean()) if not down_days.empty else max(up_avg * 0.5, 1.0)
-    return round(up_avg / max(down_avg, 1.0), 2)
-
-def calc_volume_poc_and_max_bar(df_60: pd.DataFrame) -> dict:
-    typical_price = (df_60["High"] + df_60["Low"] + df_60["Close"]) / 3.0
-    vols = df_60["vol_lots"].values
-    p_min, p_max = typical_price.min(), typical_price.max()
-    if p_max <= p_min:
-        poc_price = float(df_60["Close"].iloc[-1])
-    else:
-        bins = np.linspace(p_min, p_max, 16)
-        inds = np.clip(np.digitize(typical_price.values, bins) - 1, 0, 14)
-        bin_vols = np.bincount(inds, weights=vols, minlength=15)
-        best_bin = int(np.argmax(bin_vols))
-        poc_price = round(float((bins[best_bin] + bins[best_bin + 1]) / 2.0), 2)
-
-    df_20 = df_60.iloc[-20:]
-    max_bar = df_20.loc[df_20["vol_lots"].idxmax()]
-    return {
-        "poc_price": poc_price,
-        "max_vol_high": round(float(max_bar["High"]), 2),
-        "max_vol_low": round(float(max_bar["Low"]), 2)
-    }
-
-def calc_cdp_levels(high: float, low: float, close: float) -> dict:
-    cdp = (high + low + 2.0 * close) / 4.0
-    rng = high - low
-    return {
-        "cdp": round(cdp, 2),
-        "ah": round(cdp + rng, 2),
-        "nh": round(2 * cdp - low, 2),
-        "nl": round(2 * cdp - high, 2),
-        "al": round(cdp - rng, 2)
-    }
-
-def calc_position_size(entry: float, stop: float) -> dict:
-    if entry <= stop or entry <= 0:
-        return {"lots": 0, "stop_pct": 0.0, "max_loss_twd": 0, "capital_used": 0, "capital_pct": 0.0}
-    raw_pct = (entry - stop) / entry
-    # 強制將初始停損鎖定在 -1.8% ~ -2.6% 黃金區間 (避免過窄被誤洗，也避免過寬大賠)
-    if raw_pct > CONFIG["MAX_STOP_PCT"]:
-        stop = round(entry * (1.0 - CONFIG["MAX_STOP_PCT"]), 2)
-    elif raw_pct < CONFIG["MIN_STOP_PCT"]:
-        stop = round(entry * (1.0 - CONFIG["MIN_STOP_PCT"]), 2)
-
-    friction = entry * 0.005
-    risk_per_share = (entry - stop) + friction
-    max_risk_twd = CONFIG["ACCOUNT_EQUITY"] * CONFIG["RISK_PER_TRADE"]
-    raw_shares = max_risk_twd / risk_per_share
-    max_cap_shares = (CONFIG["ACCOUNT_EQUITY"] * CONFIG["MAX_POS_RATIO"]) / entry
-    lots = max(1, int(min(raw_shares, max_cap_shares) // 1000))
-    stop_pct = round(((stop - entry) / entry) * 100, 2)
-    capital_used = int(lots * 1000 * entry)
-    capital_pct = round((capital_used / CONFIG["ACCOUNT_EQUITY"]) * 100, 1)
-    return {
-        "lots": lots,
-        "adjusted_stop": stop,
-        "stop_pct": stop_pct,
-        "max_loss_twd": int(lots * 1000 * risk_per_share),
-        "capital_used": capital_used,
-        "capital_pct": capital_pct
-    }
-
-def calc_pct_trailing_exit_plan(entry: float, hard_stop: float, total_lots: int, ind: dict) -> dict:
-    entry_low = round(entry, 2)
-    entry_high = round(entry * 1.028, 2)
-
-    tp1_price = round(entry * (1.0 + CONFIG["TP1_TARGET_PCT"]), 2)
-    tp2_price = round(entry * (1.0 + CONFIG["TP2_TARGET_PCT"]), 2)
-    tp3_price = round(entry * (1.0 + CONFIG["TP3_TARGET_PCT"]), 2)
-
-    if total_lots >= 4:
-        tp1_lots = max(1, int(round(total_lots * 0.25)))
-        tp2_lots = max(1, int(round(total_lots * 0.35)))
-        tp3_lots = max(1, int(round(total_lots * 0.20)))
-        tail_lots = max(0, total_lots - tp1_lots - tp2_lots - tp3_lots)
-    elif total_lots == 3:
-        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 1, 1, 0
-    elif total_lots == 2:
-        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 1, 0, 0
-    else:
-        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 0, 0, 0
-
-    tp1_pct = int(round((tp1_lots / max(total_lots, 1)) * 100))
-    tp2_pct = int(round((tp2_lots / max(total_lots, 1)) * 100))
-    tp3_pct = max(0, 100 - tp1_pct - tp2_pct)
-
-    return {
-        "entry_low": entry_low,
-        "entry_high": entry_high,
-        "be_trigger_price": tp1_price,
-        "be_lock_price": round(entry * 1.015, 2),
-        "tp1_price": tp1_price,
-        "tp1_reduce_pct": tp1_pct,
-        "tp1_reduce_lots": tp1_lots,
-        "tp1_trail_drawdown": 0.055,
-        "tp2_price": tp2_price,
-        "tp2_reduce_pct": tp2_pct,
-        "tp2_reduce_lots": tp2_lots,
-        "tp2_trail_drawdown": 0.055,
-        "tp3_price": tp3_price,
-        "tp3_remain_pct": tp3_pct,
-        "tp3_remain_lots": tp3_lots + tail_lots,
-        "tp3_trail_drawdown": 0.060,
-        "dynamic_trailing_stop": hard_stop
-    }
-
-def evaluate_candidate(df: pd.DataFrame, sid: str, sname: str, sfx: str, chip_info: dict, bench_ret_20d: float) -> list:
-    if df is None or len(df) < 65:
-        return []
-    df = df.dropna(subset=["Close", "High", "Low", "Open", "Volume"]).copy()
-    if len(df) < 65:
-        return []
-
-    df["vol_lots"] = df["Volume"] / 1000.0
-    for p in [5, 10, 20, 60]:
-        df[f"MA{p}"] = df["Close"].rolling(p).mean()
-    df["MV5"] = df["vol_lots"].rolling(5).mean()
-    df["MV20"] = df["vol_lots"].rolling(20).mean()
-    df["RSI14"] = calc_rsi(df["Close"], 14)
-
-    std20 = df["Close"].rolling(20).std()
-    df["BB_UP"] = df["MA20"] + 2.0 * std20
-    df["BB_LOW"] = df["MA20"] - 2.0 * std20
-    df["BB_WIDTH"] = (df["BB_UP"] - df["BB_LOW"]) / df["MA20"]
-
-    ema12 = df["Close"].ewm(span=12, adjust=False).mean()
-    ema26 = df["Close"].ewm(span=26, adjust=False).mean()
-    df["DIF"] = ema12 - ema26
-    df["MACD"] = df["DIF"].ewm(span=9, adjust=False).mean()
-    df["MACD_HIST"] = df["DIF"] - df["MACD"]
-
-    cur = df.iloc[-1]
-    prev = df.iloc[-2]
-    if pd.isna(cur["MA60"]) or cur["MV20"] < CONFIG["MIN_MV20_LOTS"] or cur["Close"] < CONFIG["MIN_PRICE"]:
-        return []
-
-    stock_ret_20d = (float(cur["Close"]) - float(df.iloc[-21]["Close"])) / max(float(df.iloc[-21]["Close"]), 1.0)
-    stock_ret_40d = (float(cur["Close"]) - float(df.iloc[-41]["Close"])) / max(float(df.iloc[-41]["Close"]), 1.0)
-    rs_score = round((0.6 * stock_ret_20d + 0.4 * stock_ret_40d) * 100, 2)
-    rs_strong = (stock_ret_20d >= bench_ret_20d + 0.015) and (rs_score >= 3.5)
-
-    ud_vol_ratio = calc_up_down_vol_ratio(df.iloc[-10:])
-    if not rs_strong or ud_vol_ratio < 1.30:
-        return []
-
-    vol_profile = calc_volume_poc_and_max_bar(df.iloc[-60:])
-    cdp_info = calc_cdp_levels(float(cur["High"]), float(cur["Low"]), float(cur["Close"]))
-
-    ind_pack = {
-        "ma5": round(float(cur["MA5"]), 2),
-        "ma10": round(float(cur["MA10"]), 2),
-        "ma20": round(float(cur["MA20"]), 2),
-        "ma60": round(float(cur["MA60"]), 2),
-        "bb_up": round(float(cur["BB_UP"]), 2),
-        "bb_mid": round(float(cur["MA20"]), 2),
-        "bb_low": round(float(cur["BB_LOW"]), 2),
-        "poc_price": vol_profile["poc_price"],
-        "max_vol_high": vol_profile["max_vol_high"],
-        "max_vol_low": vol_profile["max_vol_low"],
-        "cdp": cdp_info["cdp"],
-        "cdp_ah": cdp_info["ah"],
-        "cdp_nh": cdp_info["nh"],
-        "cdp_nl": cdp_info["nl"],
-        "cdp_al": cdp_info["al"],
-        "swing_high_20": round(float(df.iloc[-20:]["High"].max()), 2),
-        "swing_high_60": round(float(df.iloc[-60:]["High"].max()), 2),
-        "ud_vol_ratio": ud_vol_ratio,
-        "rs_score": rs_score
-    }
-
-    last5 = df.iloc[-5:]
-    prev_4_high = df.iloc[-5:-1]["High"].max()
-    prev_10_high = df.iloc[-11:-1]["High"].max()
-    prev_15_high = df.iloc[-16:-1]["High"].max()
-
-    f_net = chip_info.get("foreign_net", 0)
-    it_net = chip_info.get("it_net", 0)
-    inst_net = chip_info.get("total_inst", f_net + it_net)
-    chip_positive = (it_net > 0) or (f_net > 0) or (inst_net >= 0)
-
-    trend_up = (cur["Close"] > cur["MA20"] > cur["MA60"]) and \
-               (cur["MA20"] > df.iloc[-5]["MA20"]) and (cur["MA60"] > df.iloc[-5]["MA60"])
-    candle_pos = (cur["Close"] - cur["Low"]) / max(cur["High"] - cur["Low"], 0.01)
-
-    matched = []
-
-    # S0: VCP 收斂帶量點火突破 (v6.0 +3.06% 正報酬公式)
-    amp_4d = (df.iloc[-5:-1]["High"].max() - df.iloc[-5:-1]["Low"].min()) / max(df.iloc[-5:-1]["Low"].min(), 1)
-    vdu_ok = (df.iloc[-5:-1]["vol_lots"] < 0.65 * cur["MV20"]).any()
-    if trend_up and (amp_4d <= 0.042) and vdu_ok and (cur["Close"] > prev_4_high) and \
-       (cur["Close"] > cur["Open"] * 1.012) and (cur["vol_lots"] >= 1.20 * cur["MV5"]) and (candle_pos >= 0.70) and (55 <= cur["RSI14"] <= 72) and chip_positive:
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(last5["Low"].min() * 0.996, entry * 0.975)), 2)
-        matched.append(("S0_VCP收斂", entry, stop))
-
-    # S1: 口袋支點拉回點火 (v6.0 100% 勝率 +2.49% 正報酬公式)
-    near_ma = (-0.008 <= (cur["Close"] - cur["MA10"]) / cur["MA10"] <= 0.022) or \
-              (-0.008 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.020)
-    prev10 = df.iloc[-11:-1]
-    down_vols = prev10[prev10["Close"] < prev10["Open"]]["vol_lots"]
-    max_down_vol = down_vols.max() if not down_vols.empty else 0
-    if trend_up and near_ma and (cur["Close"] > df.iloc[-3:-1]["High"].max()) and (cur["Close"] > cur["Open"] * 1.012) and \
-       (cur["vol_lots"] > max_down_vol > 0) and (candle_pos >= 0.70) and (54 <= cur["RSI14"] <= 70) and chip_positive:
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.995, entry * 0.975)), 2)
-        matched.append(("S1_口袋支點拉回", entry, stop))
-
-    # S2: 布林帶寬極度壓縮突破 (v6.0 單筆大賺 +6.42% 主力公式)
-    avg_bb_w = float(df.iloc[-9:-1]["BB_WIDTH"].mean())
-    if trend_up and (avg_bb_w <= 0.120) and (cur["Close"] > prev_15_high) and \
-       (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.065) and (candle_pos >= 0.72) and \
-       (1.45 * cur["MV20"] <= cur["vol_lots"] <= 3.5 * cur["MV20"]) and (cur["MACD_HIST"] > prev["MACD_HIST"] > 0) and chip_positive:
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"], cur["MA10"]) * 0.995), 2)
-        matched.append(("S2_主升段3浪", entry, stop))
-
-    # S3: 精銳版強勢洗盤破底翻 (v6.0 勝率 61.5% +2.20% 正報酬公式)
-    dipped_ma10 = (df.iloc[-4:-1]["Low"] < df.iloc[-4:-1]["MA10"] * 0.996).any()
-    power_reclaim = (cur["Close"] > prev_4_high) and (cur["Close"] >= cur["MA5"]) and \
-                    (cur["Close"] >= cur["MA10"]) and (cur["Close"] >= cur["Open"] * 1.025) and \
-                    (candle_pos >= 0.75) and (cur["vol_lots"] >= 1.35 * cur["MV5"])
-    if trend_up and dipped_ma10 and power_reclaim and (ud_vol_ratio >= 1.40) and (55 <= cur["RSI14"] <= 68) and chip_positive:
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.996, entry * 0.975)), 2)
-        matched.append(("S3_破底翻2B", entry, stop))
-
-    # S4: 達瓦斯箱型威力跳空 (v6.0 100% 勝率、單筆 +12.56% 暴利王牌)
-    box_amp_10 = (df.iloc[-11:-1]["High"].max() - df.iloc[-11:-1]["Low"].min()) / max(df.iloc[-11:-1]["Low"].min(), 1)
-    breakout_power = (cur["Close"] > prev_10_high) and ((cur["Open"] > prev["Close"] * 1.010) or (cur["Close"] >= prev["Close"] * 1.032))
-    if trend_up and (box_amp_10 <= 0.090) and breakout_power and (candle_pos >= 0.72) and \
-       (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.085) and (cur["vol_lots"] >= 1.5 * cur["MV20"]) and chip_positive:
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-        matched.append(("S4_威力跳空", entry, stop))
-
-    # S5: 【正報酬重構】強勢股 N 字回測 10MA 黃金轉折 (Bull Flag Pullback：不追雙頂高點，買在回測 10MA 轉強首根紅K)
-    high_15d = df.iloc[-16:-2]["High"].max()
-    pullback_from_peak = (0.025 <= (high_15d - cur["Close"]) / max(high_15d, 1) <= 0.075)
-    touched_ma10 = (cur["Low"] <= cur["MA10"] * 1.008) or (prev["Low"] <= prev["MA10"] * 1.008)
-    turn_up_k = (cur["Close"] >= cur["MA5"]) and (cur["Close"] >= cur["MA10"]) and \
-                (cur["Close"] > prev["High"]) and (cur["Close"] > cur["Open"] * 1.012) and (candle_pos >= 0.70)
-    if trend_up and (cur["MA10"] > cur["MA20"]) and pullback_from_peak and touched_ma10 and turn_up_k and \
-       (ud_vol_ratio >= 1.40) and (52 <= cur["RSI14"] <= 66) and chip_positive:
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(min(cur["Low"], cur["MA20"]) * 0.995, entry * 0.975)), 2)
-        matched.append(("S5_法人量價共振", entry, stop))
-
-    results = []
-    trade_d = df.index[-1].strftime("%Y-%m-%d")
-    ex_prefix = "otc" if sfx == ".TWO" else "tse"
-    for strat, entry, raw_stop in matched:
-        pos = calc_position_size(entry, raw_stop)
-        if pos["lots"] > 0:
-            adj_stop = pos["adjusted_stop"]
-            exit_plan = calc_pct_trailing_exit_plan(entry, adj_stop, pos["lots"], ind_pack)
-            results.append({
-                "date": trade_d,
-                "stock_id": sid,
-                "stock_name": sname,
-                "ex_prefix": ex_prefix,
-                "strategy": strat,
-                "close": round(float(cur["Close"]), 2),
-                "entry_price": entry,
-                "hard_stop": adj_stop,
-                "stop_pct": pos["stop_pct"],
-                "suggested_lots": pos["lots"],
-                "capital_used": pos["capital_used"],
-                "capital_pct": pos["capital_pct"],
-                "max_loss_twd": pos["max_loss_twd"],
-                "indicators_backend": ind_pack,
-                "exit_plan": exit_plan
-            })
-    return results
+# (calc_* / evaluate_candidate 已移至 strategy_core.py, 此處不再重複實作)
 
 def fetch_twse_institutional() -> tuple[str, dict]:
     chip_map = {}
@@ -422,7 +128,7 @@ def fetch_twse_institutional() -> tuple[str, dict]:
                         foreign_net = int(str(row[4]).replace(",", "")) // 1000
                         it_net = int(str(row[10]).replace(",", "")) // 1000
                         total_inst = int(str(row[-1]).replace(",", "")) // 1000
-                        chip_map[sid] = {"name": name, "foreign_net": foreign_net, "it_net": it_net, "total_inst": total_inst}
+                        chip_map[sid] = {"name": name, "foreign_net": foreign_net, "it_net": it_net, "total_inst": total_inst, "has_data": True}
                 break
         except Exception:
             continue
@@ -479,6 +185,9 @@ def update_active_positions(new_signals: list) -> list:
             "tp2_reduce_lots": ep["tp2_reduce_lots"],
             "tp2_trail_drawdown": ep["tp2_trail_drawdown"],
             "tp3_price": ep["tp3_price"],
+            "tp3_reduce_lots": ep.get("tp3_reduce_lots", 0),
+            "tp3_reduce_pct": ep.get("tp3_reduce_pct", 0),
+            "tail_lots": ep.get("tail_lots", 0),
             "tp3_remain_pct": ep["tp3_remain_pct"],
             "tp3_remain_lots": ep["tp3_remain_lots"],
             "tp3_trail_drawdown": ep["tp3_trail_drawdown"],
@@ -554,17 +263,27 @@ def main():
 
     try:
         data = yf.download(tickers, period="5mo", group_by="ticker", threads=True, progress=False)
+        bench_close, bench_ma20 = None, None
         if "0050.TW" in data.columns.get_level_values(0):
             b_df = data["0050.TW"].dropna(subset=["Close"])
             if len(b_df) > 21:
                 bench_ret_20d = (float(b_df["Close"].iloc[-1]) - float(b_df["Close"].iloc[-21])) / float(b_df["Close"].iloc[-21])
+                bench_close = float(b_df["Close"].iloc[-1])
+                bench_ma20 = float(b_df["Close"].rolling(20).mean().iloc[-1])
 
         for sid, (sname, sfx) in universe.items():
             t_sym = f"{sid}{sfx}"
             if t_sym not in data.columns.get_level_values(0):
                 continue
-            c_info = chip_map.get(sid, {"name": sname, "foreign_net": 0, "it_net": 0, "total_inst": 0})
-            sigs = evaluate_candidate(data[t_sym], sid, sname, sfx, c_info, bench_ret_20d)
+            # v2: 無法人資料 (如上櫃 T86 查不到) 明確標記 has_data=False, 不再自動通過濾網
+            c_info = chip_map.get(sid, {"name": sname, "foreign_net": 0, "it_net": 0, "total_inst": 0, "has_data": False})
+            # v2: 大盤濾網進實盤, 與 backtest 共用 market_regime_ok()
+            m_ok = True
+            s_df = data[t_sym].dropna(subset=["Close"])
+            if bench_close is not None and len(s_df) > 21:
+                s_ret20 = (float(s_df["Close"].iloc[-1]) - float(s_df["Close"].iloc[-21])) / float(s_df["Close"].iloc[-21])
+                m_ok = market_regime_ok(bench_close, bench_ma20, s_ret20)
+            sigs = evaluate_candidate(data[t_sym], sid, sname, sfx, c_info, bench_ret_20d, market_ok=m_ok)
             raw_candidates.extend(sigs)
     except Exception as e:
         print(f"⚠️ 批次下載異常: {e}")
