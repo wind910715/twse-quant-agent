@@ -282,6 +282,35 @@ def proto_rs(stocks: dict, bench: pd.DataFrame) -> dict:
     return {"P3_RS線突破": stats(rs_rets), "P3對照_無RS突破": stats(plain_rets)}
 
 
+# ---------------------------------------------------------------- P4 漲停隔日沖 (小股期)
+def proto_limitup(stocks: dict) -> dict:
+    """漲停鎖定日 (收盤漲 >=9.5%, 量 >=2x MV20, 收盤創 60 日高) 收盤進, 隔日開盤出。
+    本機 3 年驗證 (2026-10-24): 754 事件, 勝率 76.5%, 平均 +1.98%, RR 2.10;
+    量大前 40 檔更強 (勝率 83.3%, +2.79%, RR 4.08), 扣 0.6% 期貨溢價仍正。
+    此處每週以最新 2 年資料重驗, 監控效應是否衰減。haircut 以 -0.6% 保守假設列計。"""
+    all_r, liq_r = [], []
+    vols = {sid: float(df["Volume"].mean()) for sid, df in stocks.items() if len(df) >= 80}
+    top = {sid for sid, _ in sorted(vols.items(), key=lambda kv: kv[1], reverse=True)[:40]}
+    for sid, df in stocks.items():
+        if len(df) < 80:
+            continue
+        d = df.copy()
+        prev_close = d["Close"].shift(1)
+        ret = d["Close"] / prev_close - 1
+        mv20 = d["Volume"].rolling(20).mean()
+        hi60 = d["Close"].rolling(60).max()
+        ev = ((ret >= 0.095) & (d["Volume"] >= 2 * mv20) & (d["Close"] >= hi60)).fillna(False)
+        nxt_open = d["Open"].shift(-1)
+        for i in np.where(ev.values)[0]:
+            if i + 1 >= len(d):
+                continue
+            r = (float(nxt_open.iloc[i]) / float(d["Close"].iloc[i]) - 1) * 100 - 0.6
+            all_r.append(r)
+            if sid in top:
+                liq_r.append(r)
+    return {"P4_漲停隔日沖_全體(扣0.6%溢價)": stats(all_r), "P4_漲停隔日沖_量大40檔(扣0.6%溢價)": stats(liq_r)}
+
+
 # ---------------------------------------------------------------- main
 def send_telegram(text: str):
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -314,7 +343,8 @@ def main():
 
     for name, fn in [("P1", lambda: proto_rsi2(stocks)),
                      ("P2", lambda: proto_pead(stocks)),
-                     ("P3", lambda: proto_rs(stocks, bench))]:
+                     ("P3", lambda: proto_rs(stocks, bench)),
+                     ("P4", lambda: proto_limitup(stocks))]:
         try:
             out = fn()
             results["prototypes"].update(out)
