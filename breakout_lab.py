@@ -119,7 +119,7 @@ def collect_brk(data):
             if not market_regime_ok(float(b["Close"]), float(b["B_MA20"]), s_ret20):
                 continue
             if not (cur_close > float(prev20_high.iloc[i])
-                    and float(df["Volume"].iloc[i]) >= 1.5 * float(df["MV20"].iloc[i])
+                    and float(df["vol_lots"].iloc[i]) >= 1.5 * float(df["MV20"].iloc[i])
                     and cur_close > float(df["MA60"].iloc[i])):
                 continue
             stop0 = float(df["Low"].iloc[i]) * 0.995
@@ -142,28 +142,27 @@ def run_book(prepped, cands):
         if sid in active and active[sid] >= c["entry_idx_date"]:
             continue
         open_now = [s for s, until in active.items() if until >= c["entry_idx_date"]]
-        if len(open_now) >= CONFIG["MAX_POSITIONS"]:
+        if len(open_now) >= CONFIG["MAX_CONCURRENT_POSITIONS"]:
             continue
         df = prepped[sid]
         entry_idx = df.index.get_loc(c["entry_idx_date"])
         if not isinstance(entry_idx, (int, np.integer)):
             continue
-        shares, adj_stop, _ = calc_position_size(CONFIG["TOTAL_CAPITAL"], c["entry_price"], c["hard_stop"])
-        if shares <= 0:
+        sz = calc_position_size(c["entry_price"], c["hard_stop"])
+        if sz["lots"] <= 0:
             continue
-        hard_stop = max(c["hard_stop"], adj_stop) if adj_stop else c["hard_stop"]
-        sim = simulate_exit(df, int(entry_idx), c["entry_price"], hard_stop)
-        if sim is None:
+        sim = simulate_exit(df, int(entry_idx), c["entry_price"], sz["adjusted_stop"])
+        if sim["censored"]:
             continue
-        net, weighted, exit_date = sim
+        exit_date = df.index[sim["exit_idx"]]
         trades.append({"date": str(c["entry_idx_date"].date()), "stock_id": sid, "strategy": c["strategy"],
-                       "net_return_pct": net, "weighted_return_pct": weighted})
+                       "net_return_pct": sim["net_ret_pct"], "win": sim["win"]})
         active[sid] = exit_date
     if not trades:
         return {"n": 0}
-    rets = [t["weighted_return_pct"] for t in trades]
-    wins = [r for r in rets if r > 0]
-    losses = [r for r in rets if r <= 0]
+    rets = [t["net_return_pct"] for t in trades]
+    wins = [t["net_return_pct"] for t in trades if t["win"]]
+    losses = [t["net_return_pct"] for t in trades if not t["win"]]
     equity, peak, mdd = 1.0, 1.0, 0.0
     for r in rets:
         equity *= (1 + 0.20 * r / 100)
@@ -172,7 +171,7 @@ def run_book(prepped, cands):
     half = len(rets) // 2
     by_strat = {}
     for t in trades:
-        by_strat.setdefault(t["strategy"], []).append(t["weighted_return_pct"])
+        by_strat.setdefault(t["strategy"], []).append(t["net_return_pct"])
     return {"n": len(trades), "win": round(len(wins) / len(rets) * 100, 1),
             "avg": round(float(np.mean(rets)), 2),
             "rr": round(float(np.mean(wins) / abs(np.mean(losses))), 2) if wins and losses else None,
