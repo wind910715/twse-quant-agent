@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-24 07:55:42",
+  "generated_at": "2026-10-24 09:14:08",
   "prototypes": {
     "P2_PEAD_top30_hold20": {
       "n": 787,
@@ -12,9 +12,9 @@
     },
     "BASE_全部事件_hold20": {
       "n": 7035,
-      "win": 48.8,
-      "avg": 2.99,
-      "median": -0.28,
+      "win": 48.7,
+      "avg": 2.98,
+      "median": -0.3,
       "avg_win": 13.05,
       "avg_loss": -6.59,
       "rr": 1.98
@@ -31,9 +31,9 @@
     "BASE_全部事件_hold40": {
       "n": 7035,
       "win": 45.0,
-      "avg": 5.52,
-      "median": -2.34,
-      "avg_win": 21.67,
+      "avg": 5.51,
+      "median": -2.38,
+      "avg_win": 21.66,
       "avg_loss": -7.69,
       "rr": 2.82
     },
@@ -49,7 +49,7 @@
     "BASE_全部事件_hold60": {
       "n": 7035,
       "win": 41.4,
-      "avg": 7.0,
+      "avg": 6.99,
       "median": -8.54,
       "avg_win": 28.39,
       "avg_loss": -8.1,
