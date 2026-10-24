@@ -46,7 +46,10 @@ jobs:
           HOUR_UTC=$(date -u +%H)
           MODE="${{ github.event.inputs.task_mode }}"
 
-          if [ "$MODE" = "backtest" ] || [ "$DOW" -eq 6 ]; then
+          if [ "$MODE" = "dline_s3" ]; then
+            echo "🧪 執行 D 線情境三 S3 帳本驗證 (dline_s3_lab.py，預註冊 DLINE_S3_PREREG_2026-10-24.md，僅此 lab，不連帶重跑週六全套)..."
+            python dline_s3_lab.py
+          elif [ "$MODE" = "backtest" ] || [ "$DOW" -eq 6 ]; then
             echo "📈 執行每週六 09:00 自動回測績效健檢 (backtest.py)..."
             python backtest.py
             echo "🧪 執行候選策略原型實驗室 (prototype_lab.py)..."
@@ -83,8 +86,8 @@ jobs:
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
-          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json
-          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json || true
+          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json dline_s3_results.json
+          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json dline_s3_results.json || true
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
             git pull --rebase origin main || true
