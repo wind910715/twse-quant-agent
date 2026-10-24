@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""prototype_lab.py — 候選策略原型實驗室 (v1, 2026-10-23)
+"""prototype_lab.py — 候選策略原型實驗室 (v2, 2026-10-24 長視窗+剔除版)
 
 在週六回測 job 中於 backtest.py 之後執行, 結果寫 prototype_results.json 並發 Telegram。
-候選 (標準: 只接受「小賠大賺」與「小賠小賺」, 期望值須勝過同期基準):
-  P1  Connors RSI(2) 均值回歸 — 趨勢上 (Close>MA200) + RSI(2)<10, 隔日開盤進,
-      站回 MA5 出場, 外加硬停損 -5% (原版無停損, 不符小賠標準故補上), 最長 10 日。
-  P1b 布林穿透變體 — 觸發改為收盤跌破布林下軌 (20, 2σ), 其餘同 P1 (A/B 對照)。
+資料視窗: 2020-01-01 起 (使用者指定長視窗標準)。
+現行候選:
   P2  PEAD 營收驚喜漂移 — FinMind 月營收 (point-in-time: 營收月 M 於 M+1 月 11 日後可用),
       每月以年增率排名取前 30 且年增加速者, 持有 20/40/60 日, 硬停損 -8%。
-  P3  RS 線突破 — RS (個股/0050) 創 60 日新高 + 股價突破 20 日高 + 量增, 隔日確認進場,
-      跌破 MA10 出場, 硬停損 -5%, 最長 25 日; 對照組為無 RS 條件的同型突破。
+      (本質為月營收因子的事件型監控; 因子本體已由 factor_rotation.py 每月正式產名單。)
+已剔除 (2026-10-24, 常設規則: 無效且無優化路徑者刪除; 完整程式保留於 git 歷史):
+  P1/P1b RSI(2)/布林穿透 (2,100 筆輸基準)、P3 RS 線 (無增量價值, 對照組已畢業為 BRK20)、
+  P4 漲停隔日沖 (統計過關但期貨買不到, 使用者實務否決)。
 口徑: 事件研究 (每筆獨立統計, 不做組合槽位), 成本買 0.1425% / 賣 0.4425% (與主系統一致)。
 任何單一原型失敗不影響其他原型; 本腳本永遠 exit 0。
 """
@@ -66,7 +66,7 @@ def load_data(limit: int = 0):
     if limit:
         items = items[:limit]
     tickers = ["0050.TW"] + [f"{sid}{sfx}" for sid, (_, sfx) in items]
-    data = yf.download(tickers, period="2y", group_by="ticker", threads=True, progress=False)
+    data = yf.download(tickers, start="2020-01-01", group_by="ticker", threads=True, progress=False)
     bench = None
     stocks = {}
     for t in tickers:
@@ -82,71 +82,6 @@ def load_data(limit: int = 0):
             sid = t.split(".")[0]
             stocks[sid] = df
     return stocks, bench
-
-
-# ---------------------------------------------------------------- P1 RSI(2)
-def sim_mean_reversion(df: pd.DataFrame, trig: pd.Series, max_hold: int = 10) -> list:
-    """trig: 布林 Series (訊號日)。隔日開盤進, 站回 MA5 出, 硬停損 -5%, 最長 max_hold 日。同股不重疊。"""
-    close, open_, low = df["Close"], df["Open"], df["Low"]
-    ma5 = close.rolling(5).mean()
-    rets = []
-    i = 0
-    n = len(df)
-    while i < n - 2:
-        if not bool(trig.iloc[i]):
-            i += 1
-            continue
-        j = i + 1
-        if float(open_.iloc[j]) <= float(close.iloc[i]) * 0.905:  # 跌停鎖死近似: 隔日開盤近跌停, 視為買不到
-            i += 1
-            continue
-        entry = float(open_.iloc[j])
-        stop = entry * 0.95
-        exit_px = None
-        last_k = min(j + max_hold, n - 1)
-        k = j
-        while k <= last_k:
-            if float(low.iloc[k]) <= stop:
-                exit_px = float(open_.iloc[k]) if float(open_.iloc[k]) < stop else stop
-                break
-            if float(close.iloc[k]) > float(ma5.iloc[k]):
-                exit_px = float(open_.iloc[k + 1]) if k + 1 < n else float(close.iloc[k])
-                k = min(k + 1, n - 1)
-                break
-            if k == last_k:
-                exit_px = float(close.iloc[k])
-                break
-            k += 1
-        if exit_px is not None:
-            rets.append(net_ret(entry, exit_px))
-            i = k + 1
-        else:
-            i += 1
-    return rets
-
-
-def proto_rsi2(stocks: dict) -> dict:
-    p1, p1b, base = [], [], []
-    for sid, df in stocks.items():
-        if len(df) < 230:
-            continue
-        d = df.copy()
-        d["MA200"] = d["Close"].rolling(200).mean()
-        d["MA20"] = d["Close"].rolling(20).mean()
-        d["STD20"] = d["Close"].rolling(20).std()
-        d["RSI2"] = calc_rsi(d["Close"], 2)
-        trend = d["Close"] > d["MA200"]
-        trig1 = (trend & (d["RSI2"] < 10)).fillna(False)
-        lower = d["MA20"] - 2 * d["STD20"]
-        trig1b = (trend & (d["Close"] < lower)).fillna(False)
-        p1.extend(sim_mean_reversion(d, trig1))
-        p1b.extend(sim_mean_reversion(d, trig1b))
-        # 基準: 同趨勢條件下任一日的 5 日持有 (無停損), 每 5 日取樣避免重疊膨脹
-        cl, op = d["Close"], d["Open"]
-        for i in range(210, len(d) - 6, 5):
-            if bool(trend.iloc[i]):
-                base.append(net_ret(float(op.iloc[i + 1]), float(cl.iloc[i + 5])))
-    return {"P1_RSI2": stats(p1), "P1b_BB穿透": stats(p1b), "BASE_趨勢內5日持有": stats(base)}
 
 
 # ---------------------------------------------------------------- P2 PEAD (月營收)
@@ -224,93 +159,6 @@ def proto_pead(stocks: dict) -> dict:
     return out
 
 
-# ---------------------------------------------------------------- P3 RS 線突破
-def proto_rs(stocks: dict, bench: pd.DataFrame) -> dict:
-    bclose = bench["Close"]
-    rs_rets, plain_rets = [], []
-    for sid, df in stocks.items():
-        if len(df) < 130:
-            continue
-        d = df.copy()
-        aligned = bclose.reindex(d.index).ffill()
-        rs = d["Close"] / aligned
-        rs_high60 = rs.rolling(60).max()
-        prev20_high = d["High"].shift(1).rolling(20).max()
-        ma60 = d["Close"].rolling(60).mean()
-        ma10 = d["Close"].rolling(10).mean()
-        mv20 = d["Volume"].rolling(20).mean()
-        n = len(d)
-        i = 61
-        while i < n - 2:
-            breakout = (float(d["Close"].iloc[i]) > float(prev20_high.iloc[i])
-                        and float(d["Volume"].iloc[i]) >= 1.5 * float(mv20.iloc[i])
-                        and float(d["Close"].iloc[i]) > float(ma60.iloc[i]))
-            if not breakout:
-                i += 1
-                continue
-            is_rs = float(rs.iloc[i]) >= float(rs_high60.iloc[i]) - 1e-12
-            j = i + 1
-            stop0 = float(d["Low"].iloc[i]) * 0.995
-            if float(d["Open"].iloc[j]) > float(d["Close"].iloc[i]) * 1.028 or float(d["Open"].iloc[j]) <= stop0:
-                i += 1
-                continue
-            trigger = max(float(d["Close"].iloc[i]), float(d["Open"].iloc[j]) * 1.003)
-            if float(d["High"].iloc[j]) < trigger or float(d["Close"].iloc[j]) < float(d["Open"].iloc[j]) * 0.998:
-                i += 1
-                continue
-            entry = trigger
-            stop = max(stop0, entry * 0.95)
-            exit_px, last_k = None, min(j + 25, n - 1)
-            k = j
-            while k <= last_k:
-                if float(d["Low"].iloc[k]) <= stop:
-                    exit_px = float(d["Open"].iloc[k]) if float(d["Open"].iloc[k]) < stop else stop
-                    break
-                if float(d["Close"].iloc[k]) < float(ma10.iloc[k]) and k > j:
-                    exit_px = float(d["Open"].iloc[k + 1]) if k + 1 < n else float(d["Close"].iloc[k])
-                    k = min(k + 1, n - 1)
-                    break
-                if k == last_k:
-                    exit_px = float(d["Close"].iloc[k])
-                    break
-                k += 1
-            if exit_px is not None:
-                (rs_rets if is_rs else plain_rets).append(net_ret(entry, exit_px))
-                i = k + 1
-            else:
-                i += 1
-    return {"P3_RS線突破": stats(rs_rets), "P3對照_無RS突破": stats(plain_rets)}
-
-
-# ---------------------------------------------------------------- P4 漲停隔日沖 (小股期)
-def proto_limitup(stocks: dict) -> dict:
-    """漲停鎖定日 (收盤漲 >=9.5%, 量 >=2x MV20, 收盤創 60 日高) 收盤進, 隔日開盤出。
-    本機 3 年驗證 (2026-10-24): 754 事件, 勝率 76.5%, 平均 +1.98%, RR 2.10;
-    量大前 40 檔更強 (勝率 83.3%, +2.79%, RR 4.08), 扣 0.6% 期貨溢價仍正。
-    此處每週以最新 2 年資料重驗, 監控效應是否衰減。haircut 以 -0.6% 保守假設列計。"""
-    all_r, liq_r = [], []
-    vols = {sid: float(df["Volume"].mean()) for sid, df in stocks.items() if len(df) >= 80}
-    top = {sid for sid, _ in sorted(vols.items(), key=lambda kv: kv[1], reverse=True)[:40]}
-    for sid, df in stocks.items():
-        if len(df) < 80:
-            continue
-        d = df.copy()
-        prev_close = d["Close"].shift(1)
-        ret = d["Close"] / prev_close - 1
-        mv20 = d["Volume"].rolling(20).mean()
-        hi60 = d["Close"].rolling(60).max()
-        ev = ((ret >= 0.095) & (d["Volume"] >= 2 * mv20) & (d["Close"] >= hi60)).fillna(False)
-        nxt_open = d["Open"].shift(-1)
-        for i in np.where(ev.values)[0]:
-            if i + 1 >= len(d):
-                continue
-            r = (float(nxt_open.iloc[i]) / float(d["Close"].iloc[i]) - 1) * 100 - 0.6
-            all_r.append(r)
-            if sid in top:
-                liq_r.append(r)
-    return {"P4_漲停隔日沖_全體(扣0.6%溢價)": stats(all_r), "P4_漲停隔日沖_量大40檔(扣0.6%溢價)": stats(liq_r)}
-
-
 # ---------------------------------------------------------------- main
 def send_telegram(text: str):
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -332,7 +180,7 @@ def main():
         stocks, bench = load_data(limit)
         if bench is None or not stocks:
             raise RuntimeError("yfinance 資料下載失敗")
-        lines.append(f"股票池 {len(stocks)} 檔 / 資料 2 年")
+        lines.append(f"股票池 {len(stocks)} 檔 / 資料 2020-2026")
     except Exception as e:
         lines.append(f"⚠️ 資料載入失敗: {e}")
         results["error"] = str(e)
@@ -342,9 +190,9 @@ def main():
         return
 
     # P4 漲停隔日沖: 2026-10-24 使用者實務否決 (漲停鎖死日期貨買不到, 進場假設不成立), 自實驗室移除, 函數保留備查
-    for name, fn in [("P1", lambda: proto_rsi2(stocks)),
-                     ("P2", lambda: proto_pead(stocks)),
-                     ("P3", lambda: proto_rs(stocks, bench))]:
+    # 2026-10-24 剔除 (常設規則: 無效且無優化路徑者刪除): P1 RSI(2)/P1b (2,100 筆輸基準)、
+    # P3 RS 線 (無增量價值; 其對照組已畢業為主系統 BRK20)、P4 漲停隔日沖 (期貨買不到已擱置)。
+    for name, fn in [("P2", lambda: proto_pead(stocks))]:
         try:
             out = fn()
             results["prototypes"].update(out)

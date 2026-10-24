@@ -48,7 +48,7 @@ def run_portfolio_backtest() -> dict:
     universe = build_dynamic_index_universe()
     sample_items = list(universe.items())[:220]
     tickers = ["0050.TW"] + [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
-    data = yf.download(tickers, period="9mo", group_by="ticker", threads=True, progress=False)
+    data = yf.download(tickers, start="2020-01-01", group_by="ticker", threads=True, progress=False)
 
     bench_df = None
     if "0050.TW" in data.columns.get_level_values(0):

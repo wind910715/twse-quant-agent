@@ -4,7 +4,7 @@
 隔日確認進場、系統出場引擎、硬停損比照家規 (訊號低點 x0.995 且不深於 -2.5%)、
 組合 5 槽位、同股不重疊、大盤 regime 門檻。三本帳: BRK_ONLY / S_ONLY (S0/S3/S4) / MERGED (S 優先)。
 過關: BRK_ONLY 的 RR >= 1.8 且累計為正、後半段平均為正; MERGED 優於 S_ONLY 才算有增量價值。
-資料: yfinance 3 年日 K, universe 與 screener 相同。結果寫 breakout_lab_results.json 並發 TG。
+資料: yfinance 日 K (2020-01-01 起, 使用者指定長視窗), universe 與 screener 相同。結果寫 breakout_lab_results.json 並發 TG。
 """
 import os
 import json
@@ -46,7 +46,7 @@ def load_data():
     universe = build_dynamic_index_universe()
     items = list(universe.items())
     tickers = ["0050.TW"] + [f"{sid}{sfx}" for sid, (_, sfx) in items]
-    data = yf.download(tickers, period="3y", group_by="ticker", threads=True, progress=False)
+    data = yf.download(tickers, start="2020-01-01", group_by="ticker", threads=True, progress=False)
     bench, stocks = None, {}
     for t in tickers:
         try:
@@ -195,7 +195,7 @@ def main():
                "MERGED": run_book(prepped, s_cands + b_cands)}
     with open(RESULTS_FILE, "w") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    lines = ["🧪 BRK20 突破量增組合級驗證 (3 年, 系統出場引擎)"]
+    lines = ["🧪 BRK20 突破量增組合級驗證 (2020-2026, 系統出場引擎)"]
     for k in ("BRK_ONLY", "S_ONLY", "MERGED"):
         r = results[k]
         if r.get("n"):

@@ -79,7 +79,7 @@ def main():
             return f"{tag}: 無交易"
         return (f"{tag}: {r['n']} 筆 勝率 {r['win']}% 平均 {r['avg']:+.2f}% RR {r['rr']} "
                 f"累計 {r['cum_slot20']:+.2f}% 後半 {r['h2_avg']:+.2f}%")
-    lines = ["🔎 進場選擇濾網實驗 (3 年, S 策略集)"]
+    lines = ["🔎 進場選擇濾網實驗 (2020-2026, S 策略集)"]
     lines.append(fmt("BASE", base))
     for name in FILTERS:
         lines.append(fmt(name, results[name]) + (" ✅過關" if results[name]["pass"] else " ✖"))
