@@ -35,12 +35,14 @@ CONFIG = {
 }
 
 # v3.3 決策 (使用者指示): 不適用策略直接刪除, 只留通過標準者 (小賠大賺/小賠小賺, 期望值為正)。
-#   現行: S0 VCP收斂 (賺賠比 2.91) / S3 破底翻2B (勝率 63.6%) / S4 威力跳空 (升格觀察)。
 # v3.4 (2026-10-24, 使用者拍板): 併入 BRK20_突破量增 (breakout_lab 組合級驗證過關:
 #   BRK_ONLY 375 筆 RR 2.14, MERGED RR 2.10 > S_ONLY 1.95, 累計 +398.6% vs +41.1%, MDD -7.36%)。
 #   已刪除: S1 口袋支點拉回、S2 主升段3浪、S5 強勢回檔反彈 (理由見 CHANGES_V32.md / CHANGES_V33.md)。
+# v3.5 (2026-10-24, 使用者拍板): S0 收斂門檻放寬為 amp_4d ≤0.060 (S0-V1, 預註冊優化實驗過關:
+#   長視窗 62 筆、勝率 50.0%、平均 +2.10%、RR 2.51); S4 威力跳空剃除 (三種放寬變體全數平均轉負)。
+#   現行: S0 VCP收斂 / S3 破底翻2B / BRK20 突破量增。
 STRATEGY_NAMES = [
-    "S0_VCP收斂", "S3_破底翻2B", "S4_威力跳空",
+    "S0_VCP收斂", "S3_破底翻2B",
 ]
 
 
@@ -292,7 +294,8 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     amp_4d = (df.iloc[-5:-1]["High"].max() - df.iloc[-5:-1]["Low"].min()) / max(df.iloc[-5:-1]["Low"].min(), 1)
     vdu_ok = (df.iloc[-5:-1]["vol_lots"] < 0.65 * cur["MV20"]).any()
     # v3.1: 量縮收緊與 MA20 延伸上限經回測證實有害 (S0 交易 5->1, S3 11->2, 後半段轉負), 已退回 v2 條件。
-    if s_gates_ok and trend_up and (amp_4d <= 0.042) and vdu_ok and (cur["Close"] > prev_4_high) and \
+    # v3.5: 收斂門檻放寬為 0.060 (S0-V1, 預註冊優化實驗過關, 其餘 S0 門檻不動)。
+    if s_gates_ok and trend_up and (amp_4d <= 0.060) and vdu_ok and (cur["Close"] > prev_4_high) and \
        (cur["Close"] > cur["Open"] * 1.012) and (cur["vol_lots"] >= 1.20 * cur["MV5"]) and \
        (candle_pos >= 0.70) and (55 <= cur["RSI14"] <= 72):
         entry = round(float(cur["Close"]), 2)
@@ -309,18 +312,8 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(cur["Low"] * 0.996, entry * 0.975)), 2)
         matched.append(("S3_破底翻2B", entry, stop))
 
-    # S4: 達瓦斯箱型威力跳空
-    box_amp_10 = (df.iloc[-11:-1]["High"].max() - df.iloc[-11:-1]["Low"].min()) / max(df.iloc[-11:-1]["Low"].min(), 1)
-    breakout_power = (cur["Close"] > prev_10_high) and \
-                     ((cur["Open"] > prev["Close"] * 1.010) or (cur["Close"] >= prev["Close"] * 1.032))
-    if s_gates_ok and trend_up and (box_amp_10 <= 0.090) and breakout_power and (candle_pos >= 0.72) and \
-       (0 <= (cur["Close"] - cur["MA20"]) / cur["MA20"] <= 0.085) and (cur["vol_lots"] >= 1.5 * cur["MV20"]):
-        entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-        matched.append(("S4_威力跳空", entry, stop))
-
     # BRK20_突破量增 (v3.4): 優先序最低 (同日同股與 S 策略同發時 S 優先, 與驗證版 MERGED 口徑一致)。
-    # 停損 = max(訊號日低點 x0.995, 進場 x0.975), 與 S4 同式; 驗證版以隔日 trigger 計地板, 差異僅出現在
+    # 停損 = max(訊號日低點 x0.995, 進場 x0.975); 驗證版以隔日 trigger 計地板, 差異僅出現在
     # 跳空且結構停損較淺的子集 (<=0.3%), 已於 CHANGES_V34.md 揭露。
     if brk_hit:
         entry = round(float(cur["Close"]), 2)

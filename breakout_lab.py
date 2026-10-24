@@ -2,7 +2,7 @@
 本機事件研究先發現: P3 的 RS 條件無增量價值, 但其對照組「20 日突破+量增」本體強
 (2 年 546 筆, 平均 +3.67%, RR 3.53, 簡易出場)。本實驗以主系統口徑重驗:
 隔日確認進場、系統出場引擎、硬停損比照家規 (訊號低點 x0.995 且不深於 -2.5%)、
-組合 5 槽位、同股不重疊、大盤 regime 門檻。三本帳: BRK_ONLY / S_ONLY (S0/S3/S4) / MERGED (S 優先)。
+組合 5 槽位、同股不重疊、大盤 regime 門檻。三本帳: BRK_ONLY / S_ONLY (S0/S3, v3.5 起 S4 已剃除) / MERGED (S 優先)。
 過關: BRK_ONLY 的 RR >= 1.8 且累計為正、後半段平均為正; MERGED 優於 S_ONLY 才算有增量價值。
 資料: yfinance 日 K (2020-01-01 起, 使用者指定長視窗), universe 與 screener 相同。結果寫 breakout_lab_results.json 並發 TG。
 """

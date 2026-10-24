@@ -57,7 +57,7 @@ def run_portfolio_backtest() -> dict:
         bench_df["B_RET20"] = bench_df["Close"].pct_change(20)
 
     trades = []
-    shadow_trades = []  # v3: 同日同股的次要策略訊號也做影子模擬統計 (不占組合資金), 避免像 S4 被優先序吞掉而看不見表現
+    shadow_trades = []  # v3: 同日同股的次要策略訊號也做影子模擬統計 (不占組合資金), 避免次要訊號被優先序吞掉而看不見表現
     censored_count = 0
     skipped_portfolio_full = 0
     skipped_stock_busy = 0

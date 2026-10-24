@@ -52,8 +52,8 @@ def test_exit_plan_tp3_fields():
 
 
 # ---------- synthetic breakout: chip & market gates ----------
-def make_s4_gap_df(n=75):
-    """緩漲 -> 10日箱型 -> 最後一天跳空大漲, 設計給 S4 觸發。"""
+def make_gap_df(n=75):
+    """緩漲 -> 10日箱型 -> 最後一天跳空大漲, 設計給突破型策略觸發 (v3.5 起 S4 已剃除, 本合成資料現觸發 BRK20)。"""
     rng = np.random.default_rng(7)
     closes = []
     price = 60.0
@@ -75,7 +75,7 @@ def make_s4_gap_df(n=75):
     return pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"], index=idx)
 
 def test_gates_block_and_unblock():
-    df = make_s4_gap_df()
+    df = make_gap_df()
     chip_ok = {"has_data": True, "foreign_net": 800, "it_net": 200, "total_inst": 1000}
     # 無法人資料 + require_chip=True (實盤預設) -> 不給訊號
     assert evaluate_candidate(df, "9999", "測試", ".TW", None, bench_ret_20d=-0.02, market_ok=True) == []
@@ -83,7 +83,7 @@ def test_gates_block_and_unblock():
     assert evaluate_candidate(df, "9999", "測試", ".TW", chip_ok, bench_ret_20d=-0.02, market_ok=False) == []
     # 兩道門都開 -> 至少要能觸發一個策略 (驗證合成資料真的符合型態)
     sigs = evaluate_candidate(df, "9999", "測試", ".TW", chip_ok, bench_ret_20d=-0.02, market_ok=True)
-    assert len(sigs) >= 1, "synthetic S4 pattern should trigger at least one strategy"
+    assert len(sigs) >= 1, "synthetic gap pattern should trigger at least one strategy"
     assert all(s["suggested_lots"] >= 1 for s in sigs)
     print("triggered:", [s["strategy"] for s in sigs])
 
