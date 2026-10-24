@@ -135,6 +135,23 @@ def collect_brk(data):
     return cands
 
 
+def summarize_by_year(trades):
+    """加法輸出 (2026-10-24 報表修正): 依進場年分組, 每年一行 n/勝率/平均/RR。
+    不動既有統計, 僅供結果檔新增 by_year 鍵與文末分年度行使用。"""
+    out = {}
+    for y in sorted({t["date"][:4] for t in trades}):
+        yr = [t for t in trades if t["date"][:4] == y]
+        wins = [t["net_return_pct"] for t in yr if t["win"]]
+        losses = [t["net_return_pct"] for t in yr if not t["win"]]
+        out[y] = {
+            "n": len(yr),
+            "win": round(len(wins) / len(yr) * 100, 1) if yr else 0.0,
+            "avg": round(float(np.mean([t["net_return_pct"] for t in yr])), 2),
+            "rr": round(float(np.mean(wins) / abs(np.mean(losses))), 2) if wins and losses else None,
+        }
+    return out
+
+
 def run_book(prepped, cands):
     trades, active = [], {}
     for c in sorted(cands, key=lambda x: x["entry_idx_date"]):
@@ -177,7 +194,8 @@ def run_book(prepped, cands):
             "rr": round(float(np.mean(wins) / abs(np.mean(losses))), 2) if wins and losses else None,
             "cum_slot20": round((equity - 1) * 100, 2), "mdd": round(mdd, 2),
             "h1_avg": round(float(np.mean(rets[:half])), 2), "h2_avg": round(float(np.mean(rets[half:])), 2),
-            "by_strategy": {k: {"n": len(v), "avg": round(float(np.mean(v)), 2)} for k, v in by_strat.items()}}
+            "by_strategy": {k: {"n": len(v), "avg": round(float(np.mean(v)), 2)} for k, v in by_strat.items()},
+            "by_year": summarize_by_year(trades)}
 
 
 def main():
@@ -202,6 +220,13 @@ def main():
             lines.append(f"{k}: {r['n']} 筆 勝率 {r['win']}% 平均 {r['avg']:+.2f}% RR {r['rr']} 累計(槽位20%) {r['cum_slot20']:+.2f}% MDD {r['mdd']:.2f}% 前/後半 {r['h1_avg']:+.2f}/{r['h2_avg']:+.2f}")
         else:
             lines.append(f"{k}: 無交易")
+    # 加法輸出: 既有行不動, 文末附加分年度行 (每年一行, 含 2022 空頭年)。
+    for k in ("BRK_ONLY", "S_ONLY", "MERGED"):
+        r = results[k]
+        if r.get("by_year"):
+            lines.append(f"📅 {k} 分年度：")
+            for y, v in r["by_year"].items():
+                lines.append(f"  {y}: {v['n']} 筆 勝率 {v['win']}% 平均 {v['avg']:+.2f}% RR {v['rr']}")
     send_telegram("\n".join(lines))
     print("\n".join(lines))
     print("DONE")
