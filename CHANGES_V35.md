@@ -14,6 +14,10 @@
 
 - S3、BRK20（v3.4 evaluate_candidate）邏輯不動；CONFIG 基準與出場參數不動；F2 濾網重測使用者尚未決定，本次未列入。
 
-## 待驗證
+## 生產驗證（已完成，Actions run 40079605943，commit 94198ab，結論 success，同步 commit fa629a5）
 
-- 本次落地後須以 workflow_dispatch 跑完整長視窗 backtest，確認實盤口徑（S0-V1 生產數字與實驗室方向一致、S4 無訊號）後，本文件再補生產數字。
+- backtest.py 實盤口徑（latest_backtest.json，2020–2026）：總筆數 1141、勝率 53.5%、RR 1.99、MDD −16.21%、前／後半平均 +1.34%/+2.20%。
+- **S0（V1）生產數字與實驗室完全一致**：62 筆、勝率 50.0%、平均 +2.10%；系統內 S3 為 53 筆、66.0%、+3.16%，與實驗室 V1 系統相同。
+- **S4 已無訊號**：backtest.py 主策略與影子統計、breakout_lab 三本帳皆無 S4 項目。
+- breakout_lab 本 run：BRK_ONLY 831 筆 RR 2.21、前／後半 +1.72/+2.10；MERGED 845 筆 RR 2.10、前／後半 +1.88/+2.11，與長視窗判決方向一致（小幅資料時點差）。
+- 對照差異揭露：生產總筆數 1141 vs 實驗室 V1 系統 1144、RR 1.99 vs 2.01、MDD −16.21% vs −16.54%，屬資料時點差，不構成背離；backtest.py 策略細項仍不列 BRK20（STRATEGY_NAMES 未含 BRK20 的既有缺口，總數減 S0/S3 得 BRK 約 1026 筆為減法推論）。
