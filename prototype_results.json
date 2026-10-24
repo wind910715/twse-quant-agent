@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-24 09:14:08",
+  "generated_at": "2026-10-24 12:34:04",
   "prototypes": {
     "P2_PEAD_top30_hold20": {
       "n": 787,
@@ -32,7 +32,7 @@
       "n": 7035,
       "win": 45.0,
       "avg": 5.51,
-      "median": -2.38,
+      "median": -2.36,
       "avg_win": 21.66,
       "avg_loss": -7.69,
       "rr": 2.82

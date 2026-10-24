@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-10-24 10:01:53",
+  "generated_at": "2026-10-24 13:34:04",
   "window": "2020-01-01~",
   "prereg": "S04_OPT_PREREG_2026-10-24.md",
   "systems": {
     "BASE": {
-      "total_trades": 1141,
-      "win_rate": 53.5,
-      "rr_ratio": 2.01,
-      "mdd_pct": -12.82,
+      "total_trades": 1136,
+      "win_rate": 53.6,
+      "rr_ratio": 1.99,
+      "mdd_pct": -13.72,
       "by_strategy": {
         "S0_VCP收斂": {
           "trades": 26,
@@ -43,26 +43,26 @@
           "second_half_avg": 1.23
         },
         "BRK20_突破量增": {
-          "trades": 1035,
-          "win_rate": 53.3,
-          "avg_return_pct": 1.73,
-          "rr_ratio": 1.98,
-          "avg_win_pct": 5.8,
-          "avg_loss_pct": -2.93,
+          "trades": 1030,
+          "win_rate": 53.5,
+          "avg_return_pct": 1.72,
+          "rr_ratio": 1.96,
+          "avg_win_pct": 5.77,
+          "avg_loss_pct": -2.94,
           "years": 7,
           "first_half_avg": 1.26,
-          "second_half_avg": 2.19
+          "second_half_avg": 2.18
         }
       },
       "censored": 10,
-      "skipped_full": 1324,
-      "skipped_busy": 506
+      "skipped_full": 1328,
+      "skipped_busy": 508
     },
     "S0-V1": {
-      "total_trades": 1148,
-      "win_rate": 53.5,
-      "rr_ratio": 2.0,
-      "mdd_pct": -13.21,
+      "total_trades": 1144,
+      "win_rate": 53.7,
+      "rr_ratio": 1.98,
+      "mdd_pct": -14.11,
       "by_strategy": {
         "S0_VCP收斂": {
           "trades": 62,
@@ -98,26 +98,26 @@
           "second_half_avg": -1.22
         },
         "BRK20_突破量增": {
-          "trades": 1020,
-          "win_rate": 53.3,
-          "avg_return_pct": 1.72,
-          "rr_ratio": 1.97,
-          "avg_win_pct": 5.79,
-          "avg_loss_pct": -2.94,
+          "trades": 1016,
+          "win_rate": 53.5,
+          "avg_return_pct": 1.71,
+          "rr_ratio": 1.95,
+          "avg_win_pct": 5.76,
+          "avg_loss_pct": -2.95,
           "years": 7,
-          "first_half_avg": 1.29,
+          "first_half_avg": 1.28,
           "second_half_avg": 2.15
         }
       },
       "censored": 10,
-      "skipped_full": 1333,
-      "skipped_busy": 506
+      "skipped_full": 1337,
+      "skipped_busy": 508
     },
     "S0-V2": {
-      "total_trades": 1141,
-      "win_rate": 53.5,
-      "rr_ratio": 2.01,
-      "mdd_pct": -12.82,
+      "total_trades": 1136,
+      "win_rate": 53.6,
+      "rr_ratio": 1.99,
+      "mdd_pct": -13.72,
       "by_strategy": {
         "S0_VCP收斂": {
           "trades": 31,
@@ -153,26 +153,26 @@
           "second_half_avg": 1.75
         },
         "BRK20_突破量增": {
-          "trades": 1032,
-          "win_rate": 53.4,
-          "avg_return_pct": 1.74,
-          "rr_ratio": 1.98,
-          "avg_win_pct": 5.81,
-          "avg_loss_pct": -2.93,
+          "trades": 1027,
+          "win_rate": 53.6,
+          "avg_return_pct": 1.72,
+          "rr_ratio": 1.96,
+          "avg_win_pct": 5.77,
+          "avg_loss_pct": -2.95,
           "years": 7,
           "first_half_avg": 1.26,
-          "second_half_avg": 2.21
+          "second_half_avg": 2.19
         }
       },
       "censored": 10,
-      "skipped_full": 1325,
-      "skipped_busy": 506
+      "skipped_full": 1329,
+      "skipped_busy": 509
     },
     "S0-V3": {
-      "total_trades": 1144,
-      "win_rate": 53.4,
-      "rr_ratio": 2.01,
-      "mdd_pct": -13.38,
+      "total_trades": 1139,
+      "win_rate": 53.6,
+      "rr_ratio": 1.99,
+      "mdd_pct": -14.27,
       "by_strategy": {
         "S0_VCP收斂": {
           "trades": 29,
@@ -208,26 +208,26 @@
           "second_half_avg": 1.23
         },
         "BRK20_突破量增": {
-          "trades": 1035,
-          "win_rate": 53.3,
-          "avg_return_pct": 1.73,
-          "rr_ratio": 1.98,
-          "avg_win_pct": 5.8,
-          "avg_loss_pct": -2.93,
+          "trades": 1030,
+          "win_rate": 53.5,
+          "avg_return_pct": 1.72,
+          "rr_ratio": 1.96,
+          "avg_win_pct": 5.77,
+          "avg_loss_pct": -2.94,
           "years": 7,
           "first_half_avg": 1.26,
-          "second_half_avg": 2.19
+          "second_half_avg": 2.18
         }
       },
       "censored": 10,
-      "skipped_full": 1324,
-      "skipped_busy": 506
+      "skipped_full": 1328,
+      "skipped_busy": 508
     },
     "S4-V1": {
-      "total_trades": 1141,
-      "win_rate": 53.5,
-      "rr_ratio": 2.0,
-      "mdd_pct": -12.82,
+      "total_trades": 1136,
+      "win_rate": 53.6,
+      "rr_ratio": 1.98,
+      "mdd_pct": -13.72,
       "by_strategy": {
         "S0_VCP收斂": {
           "trades": 26,
@@ -252,37 +252,37 @@
           "second_half_avg": 3.66
         },
         "S4_威力跳空": {
-          "trades": 22,
-          "win_rate": 27.3,
-          "avg_return_pct": -0.53,
-          "rr_ratio": 1.91,
-          "avg_win_pct": 4.91,
-          "avg_loss_pct": -2.57,
+          "trades": 20,
+          "win_rate": 25.0,
+          "avg_return_pct": -0.59,
+          "rr_ratio": 2.11,
+          "avg_win_pct": 5.58,
+          "avg_loss_pct": -2.65,
           "years": 7,
-          "first_half_avg": -0.67,
-          "second_half_avg": -0.38
+          "first_half_avg": -0.87,
+          "second_half_avg": -0.31
         },
         "BRK20_突破量增": {
-          "trades": 1027,
-          "win_rate": 53.7,
-          "avg_return_pct": 1.76,
-          "rr_ratio": 1.98,
-          "avg_win_pct": 5.81,
-          "avg_loss_pct": -2.94,
+          "trades": 1024,
+          "win_rate": 53.8,
+          "avg_return_pct": 1.74,
+          "rr_ratio": 1.96,
+          "avg_win_pct": 5.77,
+          "avg_loss_pct": -2.95,
           "years": 7,
-          "first_half_avg": 1.29,
-          "second_half_avg": 2.23
+          "first_half_avg": 1.28,
+          "second_half_avg": 2.2
         }
       },
       "censored": 10,
-      "skipped_full": 1324,
-      "skipped_busy": 507
+      "skipped_full": 1328,
+      "skipped_busy": 509
     },
     "S4-V2": {
-      "total_trades": 1141,
-      "win_rate": 53.2,
-      "rr_ratio": 2.01,
-      "mdd_pct": -12.83,
+      "total_trades": 1136,
+      "win_rate": 53.4,
+      "rr_ratio": 1.99,
+      "mdd_pct": -13.15,
       "by_strategy": {
         "S0_VCP收斂": {
           "trades": 26,
@@ -318,26 +318,26 @@
           "second_half_avg": 0.05
         },
         "BRK20_突破量增": {
-          "trades": 1031,
-          "win_rate": 53.2,
+          "trades": 1026,
+          "win_rate": 53.5,
           "avg_return_pct": 1.73,
-          "rr_ratio": 1.99,
-          "avg_win_pct": 5.82,
-          "avg_loss_pct": -2.93,
+          "rr_ratio": 1.97,
+          "avg_win_pct": 5.78,
+          "avg_loss_pct": -2.94,
           "years": 7,
-          "first_half_avg": 1.26,
-          "second_half_avg": 2.2
+          "first_half_avg": 1.27,
+          "second_half_avg": 2.18
         }
       },
       "censored": 10,
-      "skipped_full": 1330,
-      "skipped_busy": 506
+      "skipped_full": 1333,
+      "skipped_busy": 508
     },
     "S4-V3": {
-      "total_trades": 1141,
-      "win_rate": 53.5,
-      "rr_ratio": 2.01,
-      "mdd_pct": -12.82,
+      "total_trades": 1136,
+      "win_rate": 53.6,
+      "rr_ratio": 1.99,
+      "mdd_pct": -13.72,
       "by_strategy": {
         "S0_VCP收斂": {
           "trades": 26,
@@ -373,20 +373,20 @@
           "second_half_avg": -0.23
         },
         "BRK20_突破量增": {
-          "trades": 1029,
-          "win_rate": 53.4,
-          "avg_return_pct": 1.75,
-          "rr_ratio": 1.99,
-          "avg_win_pct": 5.81,
-          "avg_loss_pct": -2.92,
+          "trades": 1024,
+          "win_rate": 53.6,
+          "avg_return_pct": 1.74,
+          "rr_ratio": 1.97,
+          "avg_win_pct": 5.78,
+          "avg_loss_pct": -2.94,
           "years": 7,
           "first_half_avg": 1.27,
-          "second_half_avg": 2.22
+          "second_half_avg": 2.2
         }
       },
       "censored": 10,
-      "skipped_full": 1327,
-      "skipped_busy": 506
+      "skipped_full": 1331,
+      "skipped_busy": 508
     }
   },
   "verdicts": {
@@ -474,15 +474,15 @@
     "S4-V1": {
       "target": "S4_威力跳空",
       "variant": {
-        "trades": 22,
-        "win_rate": 27.3,
-        "avg_return_pct": -0.53,
-        "rr_ratio": 1.91,
-        "avg_win_pct": 4.91,
-        "avg_loss_pct": -2.57,
+        "trades": 20,
+        "win_rate": 25.0,
+        "avg_return_pct": -0.59,
+        "rr_ratio": 2.11,
+        "avg_win_pct": 5.58,
+        "avg_loss_pct": -2.65,
         "years": 7,
-        "first_half_avg": -0.67,
-        "second_half_avg": -0.38
+        "first_half_avg": -0.87,
+        "second_half_avg": -0.31
       },
       "checks": {
         "freq_ge_2x_and_floor": false,
