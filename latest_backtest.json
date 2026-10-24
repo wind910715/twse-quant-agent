@@ -1,29 +1,29 @@
 {
-  "generated_at": "2026-10-24 03:28:05",
+  "generated_at": "2026-10-24 07:55:40",
   "version": "v3_strategy_optimization",
   "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股 (目前名單, 非 point-in-time)",
-  "total_trades": 124,
-  "win_rate": 62.1,
+  "total_trades": 1136,
+  "win_rate": 53.4,
   "rr_ratio": 1.98,
-  "avg_win_pct": 5.96,
-  "avg_loss_pct": -3.01,
-  "cum_return_pct": 86.42,
-  "mdd_pct": -4.31,
+  "avg_win_pct": 5.85,
+  "avg_loss_pct": -2.95,
+  "cum_return_pct": 4805.76,
+  "mdd_pct": -15.68,
   "by_strategy": {
     "S0_VCP收斂": {
-      "trades": 5,
-      "win_rate": 40.0,
-      "avg_return_pct": 2.41
+      "trades": 26,
+      "win_rate": 30.8,
+      "avg_return_pct": 0.89
     },
     "S3_破底翻2B": {
-      "trades": 8,
-      "win_rate": 75.0,
-      "avg_return_pct": 2.83
+      "trades": 69,
+      "win_rate": 68.1,
+      "avg_return_pct": 3.27
     },
     "S4_威力跳空": {
-      "trades": 0,
-      "win_rate": 0.0,
-      "avg_return_pct": 0.0
+      "trades": 14,
+      "win_rate": 35.7,
+      "avg_return_pct": 0.35
     }
   },
   "shadow_by_strategy": {
@@ -33,31 +33,31 @@
       "avg_return_pct": 0.0
     },
     "S3_破底翻2B": {
-      "trades": 0,
+      "trades": 1,
       "win_rate": 0.0,
-      "avg_return_pct": 0.0
+      "avg_return_pct": -3.08
     },
     "S4_威力跳空": {
-      "trades": 2,
-      "win_rate": 100.0,
-      "avg_return_pct": 12.47
+      "trades": 11,
+      "win_rate": 63.6,
+      "avg_return_pct": 7.23
     }
   },
   "period_split": {
     "first_half": {
-      "trades": 62,
-      "win_rate": 61.3,
-      "avg_return_pct": 2.31
+      "trades": 568,
+      "win_rate": 49.8,
+      "avg_return_pct": 1.26
     },
     "second_half": {
-      "trades": 62,
-      "win_rate": 62.9,
-      "avg_return_pct": 2.81
+      "trades": 568,
+      "win_rate": 57.0,
+      "avg_return_pct": 2.24
     }
   },
   "censored_trades_excluded": 10,
-  "skipped_portfolio_full": 76,
-  "skipped_stock_busy": 47,
+  "skipped_portfolio_full": 1315,
+  "skipped_stock_busy": 503,
   "max_concurrent_positions": 5,
   "slot_weight_pct": 20.0,
   "chip_filter_applied": false,
