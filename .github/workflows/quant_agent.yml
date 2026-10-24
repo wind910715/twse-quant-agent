@@ -55,6 +55,8 @@ jobs:
             python breakout_lab.py || true
             echo "🔎 執行進場選擇濾網實驗 (selection_lab.py)..."
             python selection_lab.py || true
+            echo "🧪 執行 S0/S4 優化實驗室 (s04_opt_lab.py，預註冊 S04_OPT_PREREG_2026-10-24.md)..."
+            python s04_opt_lab.py || true
           elif [ "$MODE" = "screener" ] || [ "$HOUR_UTC" -ge 12 ]; then
             echo "📌 執行晚間 21:00 選股與極簡通知 (screener.py)..."
             python screener.py
@@ -81,8 +83,8 @@ jobs:
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
-          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json
-          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json || true
+          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json
+          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json || true
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
             git pull --rebase origin main || true
