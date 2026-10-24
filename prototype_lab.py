@@ -341,10 +341,10 @@ def main():
         send_telegram("\n".join(lines))
         return
 
+    # P4 漲停隔日沖: 2026-10-24 使用者實務否決 (漲停鎖死日期貨買不到, 進場假設不成立), 自實驗室移除, 函數保留備查
     for name, fn in [("P1", lambda: proto_rsi2(stocks)),
                      ("P2", lambda: proto_pead(stocks)),
-                     ("P3", lambda: proto_rs(stocks, bench)),
-                     ("P4", lambda: proto_limitup(stocks))]:
+                     ("P3", lambda: proto_rs(stocks, bench))]:
         try:
             out = fn()
             results["prototypes"].update(out)
