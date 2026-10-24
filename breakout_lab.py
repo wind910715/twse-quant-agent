@@ -68,8 +68,9 @@ def load_data():
 
 
 def collect_s(data):
+    # 與 backtest.py 完全同口徑: evaluate_candidate(df_raw.iloc[:i+1], ...) + 隔日確認進場
     bench_df = data["bench"]
-    pool = {}
+    cands = []
     for sid, (sname, sfx, df_raw) in data["stocks"].items():
         df = prepare_indicators(df_raw)
         for i in range(61, len(df) - 2):
@@ -79,17 +80,24 @@ def collect_s(data):
             b = bench_df.loc[dt]
             if pd.isna(b["B_MA20"]) or pd.isna(b["B_RET20"]):
                 continue
-            cand = evaluate_candidate(df, i, {"close": float(b["Close"]), "ma20": float(b["B_MA20"]),
-                                               "ret20": float(b["B_RET20"])})
-            if not cand:
+            cur_close = float(df["Close"].iloc[i])
+            s_ret20 = (cur_close - float(df["Close"].iloc[i - 20])) / float(df["Close"].iloc[i - 20])
+            m_ok = market_regime_ok(float(b["Close"]), float(b["B_MA20"]), s_ret20)
+            sigs = evaluate_candidate(df_raw.iloc[:i + 1], sid, sname, sfx,
+                                      chip_info=None, bench_ret_20d=float(b["B_RET20"]),
+                                      market_ok=m_ok, require_chip=False)
+            if not sigs:
                 continue
-            key = (sid, df.index[i + 1])
-            if key not in pool or cand["priority"] < pool[key][0]["priority"]:
-                pool[key] = (cand, sid)
-    cands = []
-    for (sid, entry_date), (cand, _s) in pool.items():
-        cands.append({"sid": sid, "strategy": cand["strategy"], "entry_idx_date": entry_date,
-                      "entry_price": cand["entry_price"], "hard_stop": cand["hard_stop"]})
+            sig = sigs[0]  # 同日同股多策略取優先序第一個, 不重複曝險
+            nb = df.iloc[i + 1]
+            n_open, n_high, n_close = float(nb["Open"]), float(nb["High"]), float(nb["Close"])
+            if n_open > sig["entry_price"] * 1.028 or n_open <= sig["hard_stop"]:
+                continue
+            trigger = round(max(sig["entry_price"], n_open * 1.003), 2)
+            if n_high < trigger or n_close < n_open * 0.998:
+                continue
+            cands.append({"sid": sid, "strategy": sig["strategy"], "entry_idx_date": df.index[i + 1],
+                          "entry_price": trigger, "hard_stop": sig["hard_stop"]})
     return cands
 
 
