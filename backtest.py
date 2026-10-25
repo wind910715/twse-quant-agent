@@ -29,13 +29,11 @@ from strategy_core import (
 )
 
 BACKTEST_FILE = "latest_backtest.json"
-# 報表層策略名單 (2026-10-24 報表修正, 只改報表不改訊號):
-# strategy_core.STRATEGY_NAMES 目前只列 S0/S3, 但 evaluate_candidate 自 v3.4 起
-# 也產出 BRK20_突破量增訊號, 導致 by_strategy / TG 細項漏列 BRK20 (總筆數含它、
-# 細項加總卻對不上)。本名單僅供下方三處報表迴圈使用, 不參與任何訊號邏輯、
-# CONFIG 或出場參數; 若上游 SSOT 日後補上 BRK20, 本行自動不重複。
-REPORT_STRATEGIES = ALL_STRATEGIES + (
-    ["BRK20_突破量增"] if "BRK20_突破量增" not in ALL_STRATEGIES else [])
+# 報表層策略名單 (v3.6 更名後 SSOT 已列齊 S0/S1/S2，本名單即 SSOT 本身；
+# 2026-10-24 報表修正的 append hack 已不再需要：當時 SSOT 只列 S0/S3，
+# evaluate_candidate 自 v3.4 起也產出 BRK20 訊號，導致 TG 細項漏列該支。
+# v3.6 起 SSOT 直接列出三支，細項缺口一併補上。)
+REPORT_STRATEGIES = ALL_STRATEGIES
 MAX_CONCURRENT = CONFIG["MAX_CONCURRENT_POSITIONS"]
 SLOT_WEIGHT = 1.0 / MAX_CONCURRENT  # 每筆占組合 20%
 

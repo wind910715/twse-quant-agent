@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
 """
-futures_brk20_mapper.py — 小股期 BRK20 映射版訊號產生器（repo 根目錄，與 screener.py / backtest.py 同層）
+futures_brk20_mapper.py — 小股期 S2（原 BRK20）映射版訊號產生器（repo 根目錄，與 screener.py / backtest.py 同層）
+註：檔名保留 brk20 以免斷開既有參照；程式內策略標籤已隨主系統 v3.6 更名為 S2。
 
 定位
 ----
-本程式是 twse-quant-agent 主系統「BRK20 突破量增」訊號的小股期（小現股期貨，100 股／口）
+本程式是 twse-quant-agent 主系統「S2 突破量增」（原 BRK20）訊號的小股期（小現股期貨，100 股／口）
 映射版：把主系統的日線訊號換算成期貨口數，只輸出乾淨的訊號 JSON，不做其他事。
 驗證底本：2026-10-25 小股期主系統映射期貨版第一輪回測（現股代理版），
 BRK20 映射版通過預註冊三標準（2,360 筆、勝率 51.1%、平均 +1.47%、RR 1.92、
-前半超額 +0.10pp／後半 +0.61pp、映射劣化 −0.02pp）；S0／S3 映射版未通過，故不在本程式內。
+前半超額 +0.10pp／後半 +0.61pp、映射劣化 −0.02pp）；S0／S1 映射版未通過，故不在本程式內。
 
 限制（使用前必讀，不可省略）
 ----------------------------
 (1) 本程式為現股還原價代理版：訊號與出場皆以現股 Adj Close 還原價計算，
     期貨基差未建模。正式實盤前，必須以期貨價格＋真實手續費＋價差／滑價假設重測通過，
     在那之前本程式的輸出只能當研究訊號，不能直接下單。
-(2) BRK20 前半超額僅 +0.10pp，偏薄：期貨版重測若滑價稍大即可能翻掉，勿把通過解讀為穩固。
-(3) 本程式只含 BRK20：S0／S3 映射版在同一驗證中未通過，絕對不要把它們加回來；
-    S0／S3 在生產版現股宇宙的地位不受此影響，本程式只是不寫它們的期貨映射。
+(2) S2 前半超額僅 +0.10pp，偏薄：期貨版重測若滑價稍大即可能翻掉，勿把通過解讀為穩固。
+(3) 本程式只含 S2：S0／S1 映射版在同一驗證中未通過，絕對不要把它們加回來；
+    S0／S1 在生產版現股宇宙的地位不受此影響，本程式只是不寫它們的期貨映射。
 
 與 SSOT（strategy_core.py）的對照關係（為什麼不直接回傳 evaluate_candidate）
 --------------------------------------------------------------------------
-指標全部來自 strategy_core.prepare_indicators（SSOT），BRK20 三條件與
+指標全部來自 strategy_core.prepare_indicators（SSOT），S2 三條件與
 strategy_core.evaluate_candidate 內的 brk_hit 逐字一致：
     收盤 ＞ 前 20 日最高（不含訊號日當根）；
     量（張） ≥ 1.5 × MV20；
@@ -91,7 +92,7 @@ import yfinance as yf
 
 from strategy_core import CONFIG, market_regime_ok, prepare_indicators
 
-STRATEGY = "BRK20"
+STRATEGY = "S2"
 SHARES_PER_LOT = 100
 DEFAULT_CAPITAL = 3_000_000
 RISK_PER_TRADE = 0.012

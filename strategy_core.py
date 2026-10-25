@@ -40,9 +40,13 @@ CONFIG = {
 #   已刪除: S1 口袋支點拉回、S2 主升段3浪、S5 強勢回檔反彈 (理由見 CHANGES_V32.md / CHANGES_V33.md)。
 # v3.5 (2026-10-24, 使用者拍板): S0 收斂門檻放寬為 amp_4d ≤0.060 (S0-V1, 預註冊優化實驗過關:
 #   長視窗 62 筆、勝率 50.0%、平均 +2.10%、RR 2.51); S4 威力跳空剃除 (三種放寬變體全數平均轉負)。
-#   現行: S0 VCP收斂 / S3 破底翻2B / BRK20 突破量增。
+# v3.6 (2026-10-25, 使用者拍板): 策略重新命名為 S0–S2（邏輯、門檻、優先序全不動）：
+#   S0 VCP收斂（留任）、S3 破底翻2B → S1、BRK20 突破量增 → S2。
+#   現行: S0 VCP收斂 / S1 破底翻2B / S2 突破量增。
+#   另定：盤中觸及觸發價即買進（monitor 原有行為，不加尾盤確認）；觸發當下 monitor
+#   立即發 TG 通知（含完整進出場劇本），不批次、不延遲。
 STRATEGY_NAMES = [
-    "S0_VCP收斂", "S3_破底翻2B",
+    "S0_VCP收斂", "S1_破底翻2B", "S2_突破量增",
 ]
 
 
@@ -252,7 +256,7 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     if not market_ok:
         return []
 
-    # BRK20 (v3.4 併入): 20 日突破+量增。驗證規格獨立於 S 家族的 rs_strong/ud 閘門,
+    # S2 (v3.4 併入，原 BRK20): 20 日突破+量增。驗證規格獨立於 S 家族的 rs_strong/ud 閘門,
     # 僅受 market_ok、基本有效性與法人閘門約束 (與 breakout_lab 驗證口徑一致)。
     prev_20_high = df.iloc[-21:-1]["High"].max()
     brk_hit = (float(cur["Close"]) > float(prev_20_high)) and \
@@ -302,7 +306,7 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(last5["Low"].min() * 0.996, entry * 0.975)), 2)
         matched.append(("S0_VCP收斂", entry, stop))
 
-    # S3: 強勢洗盤破底翻 (2B)
+    # S1: 強勢洗盤破底翻 (2B，原 S3)
     dipped_ma10 = (df.iloc[-4:-1]["Low"] < df.iloc[-4:-1]["MA10"] * 0.996).any()
     power_reclaim = (cur["Close"] > prev_4_high) and (cur["Close"] >= cur["MA5"]) and \
                     (cur["Close"] >= cur["MA10"]) and (cur["Close"] >= cur["Open"] * 1.025) and \
@@ -310,15 +314,15 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     if s_gates_ok and trend_up and dipped_ma10 and power_reclaim and (ud_vol_ratio >= 1.40) and (55 <= cur["RSI14"] <= 68):
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(cur["Low"] * 0.996, entry * 0.975)), 2)
-        matched.append(("S3_破底翻2B", entry, stop))
+        matched.append(("S1_破底翻2B", entry, stop))
 
-    # BRK20_突破量增 (v3.4): 優先序最低 (同日同股與 S 策略同發時 S 優先, 與驗證版 MERGED 口徑一致)。
+    # S2_突破量增 (v3.4 併入，原 BRK20): 優先序最低 (同日同股與 S 策略同發時 S 優先, 與驗證版 MERGED 口徑一致)。
     # 停損 = max(訊號日低點 x0.995, 進場 x0.975); 驗證版以隔日 trigger 計地板, 差異僅出現在
     # 跳空且結構停損較淺的子集 (<=0.3%), 已於 CHANGES_V34.md 揭露。
     if brk_hit:
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-        matched.append(("BRK20_突破量增", entry, stop))
+        matched.append(("S2_突破量增", entry, stop))
 
     results = []
     trade_d = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])
