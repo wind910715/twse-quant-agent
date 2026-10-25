@@ -2,11 +2,13 @@
 
 ## 更名（邏輯、門檻、優先序全不動，只換標籤）
 - S0 VCP收斂：留任。
-- S3 破底翻2B → **S1_破底翻2B**。
-- BRK20 突破量增 → **S2_突破量增**。
+- S3 破底翻2B → **S1_破底翻**。
+- BRK20 突破量增 → **S2_量增突破**。
 - 動到的地方：`strategy_core.py`（STRATEGY_NAMES＋matched 標籤＋檔頭註解）、
   `backtest.py`（REPORT_STRATEGIES 簡化為 SSOT 本身）、
   `futures_brk20_mapper.py`（策略標籤改為 S2；檔名保留 brk20 以免斷開既有參照）。
+- 標籤微調（同日使用者再定）：S1 簡稱「破底翻」、S2 簡稱「量增突破」，
+  即 `S1_破底翻`、`S2_量增突破`，S0 不變。
 - 沒動的地方：實驗室歷史檔（breakout_lab、s04_opt_lab、dline_s3_lab、prototype_lab）
   與歷史結果 JSON，裡面的舊名是歷史紀錄，不追溯改寫；新名自本版起生效。
 - 附帶修復：v3.6 起 SSOT 直接列齊三支，2026-10-24 的 backtest TG 細項缺 BRK20 行

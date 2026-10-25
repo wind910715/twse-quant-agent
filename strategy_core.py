@@ -42,11 +42,11 @@ CONFIG = {
 #   長視窗 62 筆、勝率 50.0%、平均 +2.10%、RR 2.51); S4 威力跳空剃除 (三種放寬變體全數平均轉負)。
 # v3.6 (2026-10-25, 使用者拍板): 策略重新命名為 S0–S2（邏輯、門檻、優先序全不動）：
 #   S0 VCP收斂（留任）、S3 破底翻2B → S1、BRK20 突破量增 → S2。
-#   現行: S0 VCP收斂 / S1 破底翻2B / S2 突破量增。
+#   現行: S0 VCP收斂 / S1 破底翻 / S2 量增突破。
 #   另定：盤中觸及觸發價即買進（monitor 原有行為，不加尾盤確認）；觸發當下 monitor
 #   立即發 TG 通知（含完整進出場劇本），不批次、不延遲。
 STRATEGY_NAMES = [
-    "S0_VCP收斂", "S1_破底翻2B", "S2_突破量增",
+    "S0_VCP收斂", "S1_破底翻", "S2_量增突破",
 ]
 
 
@@ -314,15 +314,15 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     if s_gates_ok and trend_up and dipped_ma10 and power_reclaim and (ud_vol_ratio >= 1.40) and (55 <= cur["RSI14"] <= 68):
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(cur["Low"] * 0.996, entry * 0.975)), 2)
-        matched.append(("S1_破底翻2B", entry, stop))
+        matched.append(("S1_破底翻", entry, stop))
 
-    # S2_突破量增 (v3.4 併入，原 BRK20): 優先序最低 (同日同股與 S 策略同發時 S 優先, 與驗證版 MERGED 口徑一致)。
+    # S2_量增突破 (v3.4 併入，原 BRK20): 優先序最低 (同日同股與 S 策略同發時 S 優先, 與驗證版 MERGED 口徑一致)。
     # 停損 = max(訊號日低點 x0.995, 進場 x0.975); 驗證版以隔日 trigger 計地板, 差異僅出現在
     # 跳空且結構停損較淺的子集 (<=0.3%), 已於 CHANGES_V34.md 揭露。
     if brk_hit:
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-        matched.append(("S2_突破量增", entry, stop))
+        matched.append(("S2_量增突破", entry, stop))
 
     results = []
     trade_d = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])
