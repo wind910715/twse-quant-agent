@@ -1,0 +1,42 @@
+name: intraday-swing-v1
+
+# Experiment-only workflow for the frozen v1-D spec (daily-bar proxy).
+# NEVER runs on main. Results are committed back to this experiment branch.
+
+on:
+  push:
+    branches: [exp/intraday-swing-v1]
+    paths:
+      - intraday_swing_v1.py
+      - .github/workflows/intraday-swing-v1.yml
+      - intraday_swing_v1_README.md
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install yfinance pandas
+      - name: Run v1-D backtest
+        run: python intraday_swing_v1.py --start 2020-01-01 --end 2026-10-28 --outdir results/intraday_swing_v1
+      - name: Commit results back to experiment branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add results/intraday_swing_v1/results.json results/intraday_swing_v1/summary.md
+          git diff --cached --quiet && echo "no changes to commit" || (git commit -m "intraday-swing-v1: backtest results" && git push)
+      - name: Upload results as backup artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intraday-swing-v1-results
+          path: results/intraday_swing_v1/
+          if-no-files-found: warn
