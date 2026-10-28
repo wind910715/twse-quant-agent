@@ -1,0 +1,661 @@
+{
+  "meta": {
+    "spec": "日內進場波段留倉系統_SPEC_v1.md v1-D daily-bar proxy",
+    "universe": [
+      "2330",
+      "2308",
+      "6488",
+      "2345",
+      "6669",
+      "8299",
+      "2327",
+      "3711"
+    ],
+    "window": [
+      "2020-01-01",
+      "2026-10-28"
+    ],
+    "cost_per_trade": 0.006,
+    "split_date": "2023-06-30",
+    "per_stock": {
+      "2330": {
+        "first_date": "2020-01-02",
+        "last_date": "2026-10-28",
+        "bars": 1652
+      },
+      "2308": {
+        "first_date": "2020-01-02",
+        "last_date": "2026-10-28",
+        "bars": 1652
+      },
+      "2345": {
+        "first_date": "2020-01-02",
+        "last_date": "2026-10-28",
+        "bars": 1652
+      },
+      "6669": {
+        "first_date": "2020-01-02",
+        "last_date": "2026-10-28",
+        "bars": 1653
+      },
+      "2327": {
+        "first_date": "2020-01-02",
+        "last_date": "2026-10-28",
+        "bars": 1637
+      },
+      "3711": {
+        "first_date": "2020-01-02",
+        "last_date": "2026-10-28",
+        "bars": 1652
+      }
+    },
+    "errors": {
+      "6488": "no data from Yahoo",
+      "8299": "no data from Yahoo"
+    },
+    "assumptions": [
+      "A1: '過去 N 日' windows include the signal day, EXCEPT the 20-day high which the spec explicitly excludes the signal day from. So HH10/LL10, VOL5/VOL20 (both conditions) are trailing windows ending on the signal day.",
+      "A2: Close filter compares GROSS prices (entry-day close > entry price, strictly); the 0.6% cost is deducted from every completed trade's return only.",
+      "A3: ATR14 for the hard stop is locked at the signal-day value (last complete bar before entry).",
+      "A4: Filtered group exit checks start the day AFTER entry (entry day is the filter day only); control group exit checks start on entry day.",
+      "A5: Same-day double trigger: hard stop takes precedence for the reason label; exit price is the same trigger-day close either way.",
+      "A6: Positions still open at window end are force-exited at the last available close (reason 'window_end', cost applied), so every trade has an exit.",
+      "A7: Halves split by ENTRY date against 2023-06-30; the gate uses per-half AVG net return > 0.",
+      "A8: PF = sum(net gains)/sum(|net losses|); infinite if no losing trades and gains exist.",
+      "A9: Max drawdown is measured on the cumulative-sum equity curve of trades ordered by exit date (pooled across stocks).",
+      "A10: Yahoo market-holiday rows with 0 volume are dropped before indicator computation.",
+      "A11: Net return = exit/entry - 1 - 0.006 (subtractive cost).",
+      "A12: 'Blocked next-day performance' is reported two ways: next-trading-day gross return after entry, and the hypothetical full swing-path net return under control rules."
+    ]
+  },
+  "verdict": {
+    "filtered_group": "FAIL",
+    "gates": {
+      "n_ge_30": false,
+      "avg_net_positive": true,
+      "pf_ge_1_3": false,
+      "first_half_positive": true,
+      "second_half_positive": false
+    }
+  },
+  "filtered": {
+    "stats": {
+      "n": 17,
+      "win_rate": 0.1765,
+      "avg_net_return": 0.005052,
+      "total_net_return": 0.085881,
+      "pf": 1.2612,
+      "max_drawdown": -0.181781,
+      "halves": {
+        "first_half": {
+          "n": 10,
+          "avg_net_return": 0.016942,
+          "total_net_return": 0.169425
+        },
+        "second_half": {
+          "n": 7,
+          "avg_net_return": -0.011935,
+          "total_net_return": -0.083544
+        }
+      }
+    },
+    "trades": [
+      {
+        "signal_date": "2023-11-13",
+        "entry_date": "2023-11-14",
+        "entry_price": 576.0,
+        "exit_date": "2023-11-14",
+        "exit_price": 572.0,
+        "exit_reason": "filter_out",
+        "gross_return": -0.006944,
+        "net_return": -0.012944,
+        "stock": "2330"
+      },
+      {
+        "signal_date": "2024-09-20",
+        "entry_date": "2024-09-23",
+        "entry_price": 971.0,
+        "exit_date": "2024-09-30",
+        "exit_price": 957.0,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.014418,
+        "net_return": -0.020418,
+        "stock": "2330"
+      },
+      {
+        "signal_date": "2020-10-27",
+        "entry_date": "2020-10-28",
+        "entry_price": 202.5,
+        "exit_date": "2020-10-28",
+        "exit_price": 200.5,
+        "exit_reason": "filter_out",
+        "gross_return": -0.009877,
+        "net_return": -0.015877,
+        "stock": "2308"
+      },
+      {
+        "signal_date": "2021-12-09",
+        "entry_date": "2021-12-10",
+        "entry_price": 269.0,
+        "exit_date": "2022-01-13",
+        "exit_price": 277.0,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.02974,
+        "net_return": 0.02374,
+        "stock": "2308"
+      },
+      {
+        "signal_date": "2022-07-28",
+        "entry_date": "2022-07-29",
+        "entry_price": 263.5,
+        "exit_date": "2022-07-29",
+        "exit_price": 258.0,
+        "exit_reason": "filter_out",
+        "gross_return": -0.020873,
+        "net_return": -0.026873,
+        "stock": "2308"
+      },
+      {
+        "signal_date": "2024-01-22",
+        "entry_date": "2024-01-23",
+        "entry_price": 539.0,
+        "exit_date": "2024-01-23",
+        "exit_price": 522.0,
+        "exit_reason": "filter_out",
+        "gross_return": -0.03154,
+        "net_return": -0.03754,
+        "stock": "2345"
+      },
+      {
+        "signal_date": "2024-05-29",
+        "entry_date": "2024-05-30",
+        "entry_price": 520.0,
+        "exit_date": "2024-06-25",
+        "exit_price": 532.0,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.023077,
+        "net_return": 0.017077,
+        "stock": "2345"
+      },
+      {
+        "signal_date": "2020-11-09",
+        "entry_date": "2020-11-10",
+        "entry_price": 261.4997,
+        "exit_date": "2020-11-11",
+        "exit_price": 247.419,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.053846,
+        "net_return": -0.059846,
+        "stock": "6669"
+      },
+      {
+        "signal_date": "2020-11-20",
+        "entry_date": "2020-11-23",
+        "entry_price": 109.3585,
+        "exit_date": "2021-01-29",
+        "exit_price": 150.8938,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.379808,
+        "net_return": 0.373808,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2021-11-17",
+        "entry_date": "2021-11-18",
+        "entry_price": 119.348,
+        "exit_date": "2021-12-08",
+        "exit_price": 119.4795,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.001101,
+        "net_return": -0.004899,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2023-04-12",
+        "entry_date": "2023-04-13",
+        "entry_price": 114.66,
+        "exit_date": "2023-04-13",
+        "exit_price": 113.4046,
+        "exit_reason": "filter_out",
+        "gross_return": -0.010949,
+        "net_return": -0.016949,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2023-09-12",
+        "entry_date": "2023-09-13",
+        "entry_price": 107.1276,
+        "exit_date": "2023-09-13",
+        "exit_price": 105.8722,
+        "exit_reason": "filter_out",
+        "gross_return": -0.011719,
+        "net_return": -0.017719,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2020-07-02",
+        "entry_date": "2020-07-03",
+        "entry_price": 73.7,
+        "exit_date": "2020-07-03",
+        "exit_price": 71.9,
+        "exit_reason": "filter_out",
+        "gross_return": -0.024423,
+        "net_return": -0.030423,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2021-11-08",
+        "entry_date": "2021-11-09",
+        "entry_price": 107.5,
+        "exit_date": "2021-11-09",
+        "exit_price": 105.0,
+        "exit_reason": "filter_out",
+        "gross_return": -0.023256,
+        "net_return": -0.029256,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2022-12-01",
+        "entry_date": "2022-12-02",
+        "entry_price": 100.0,
+        "exit_date": "2022-12-16",
+        "exit_price": 96.2,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.038,
+        "net_return": -0.044,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2023-11-13",
+        "entry_date": "2023-11-14",
+        "entry_price": 123.5,
+        "exit_date": "2023-11-14",
+        "exit_price": 123.5,
+        "exit_reason": "filter_out",
+        "gross_return": 0.0,
+        "net_return": -0.006,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2024-05-23",
+        "entry_date": "2024-05-24",
+        "entry_price": 159.5,
+        "exit_date": "2024-05-24",
+        "exit_price": 159.5,
+        "exit_reason": "filter_out",
+        "gross_return": 0.0,
+        "net_return": -0.006,
+        "stock": "3711"
+      }
+    ]
+  },
+  "control": {
+    "stats": {
+      "n": 17,
+      "win_rate": 0.3529,
+      "avg_net_return": 0.003716,
+      "total_net_return": 0.063178,
+      "pf": 1.1489,
+      "max_drawdown": -0.166766,
+      "halves": {
+        "first_half": {
+          "n": 10,
+          "avg_net_return": 0.006438,
+          "total_net_return": 0.064378
+        },
+        "second_half": {
+          "n": 7,
+          "avg_net_return": -0.000171,
+          "total_net_return": -0.0012
+        }
+      }
+    },
+    "trades": [
+      {
+        "signal_date": "2023-11-13",
+        "entry_date": "2023-11-14",
+        "entry_price": 576.0,
+        "exit_date": "2023-12-05",
+        "exit_price": 570.0,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.010417,
+        "net_return": -0.016417,
+        "stock": "2330"
+      },
+      {
+        "signal_date": "2024-09-20",
+        "entry_date": "2024-09-23",
+        "entry_price": 971.0,
+        "exit_date": "2024-09-30",
+        "exit_price": 957.0,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.014418,
+        "net_return": -0.020418,
+        "stock": "2330"
+      },
+      {
+        "signal_date": "2020-10-27",
+        "entry_date": "2020-10-28",
+        "entry_price": 202.5,
+        "exit_date": "2020-10-29",
+        "exit_price": 195.0,
+        "exit_reason": "hard_stop",
+        "gross_return": -0.037037,
+        "net_return": -0.043037,
+        "stock": "2308"
+      },
+      {
+        "signal_date": "2021-12-09",
+        "entry_date": "2021-12-10",
+        "entry_price": 269.0,
+        "exit_date": "2022-01-13",
+        "exit_price": 277.0,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.02974,
+        "net_return": 0.02374,
+        "stock": "2308"
+      },
+      {
+        "signal_date": "2022-07-28",
+        "entry_date": "2022-07-29",
+        "entry_price": 263.5,
+        "exit_date": "2022-08-29",
+        "exit_price": 262.5,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.003795,
+        "net_return": -0.009795,
+        "stock": "2308"
+      },
+      {
+        "signal_date": "2024-01-22",
+        "entry_date": "2024-01-23",
+        "entry_price": 539.0,
+        "exit_date": "2024-01-25",
+        "exit_price": 513.0,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.048237,
+        "net_return": -0.054237,
+        "stock": "2345"
+      },
+      {
+        "signal_date": "2024-05-29",
+        "entry_date": "2024-05-30",
+        "entry_price": 520.0,
+        "exit_date": "2024-06-25",
+        "exit_price": 532.0,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.023077,
+        "net_return": 0.017077,
+        "stock": "2345"
+      },
+      {
+        "signal_date": "2020-11-09",
+        "entry_date": "2020-11-10",
+        "entry_price": 261.4997,
+        "exit_date": "2020-11-11",
+        "exit_price": 247.419,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.053846,
+        "net_return": -0.059846,
+        "stock": "6669"
+      },
+      {
+        "signal_date": "2020-11-20",
+        "entry_date": "2020-11-23",
+        "entry_price": 109.3585,
+        "exit_date": "2021-01-29",
+        "exit_price": 150.8938,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.379808,
+        "net_return": 0.373808,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2021-11-17",
+        "entry_date": "2021-11-18",
+        "entry_price": 119.348,
+        "exit_date": "2021-12-08",
+        "exit_price": 119.4795,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.001101,
+        "net_return": -0.004899,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2023-04-12",
+        "entry_date": "2023-04-13",
+        "entry_price": 114.66,
+        "exit_date": "2023-04-20",
+        "exit_price": 108.383,
+        "exit_reason": "hard_stop",
+        "gross_return": -0.054745,
+        "net_return": -0.060745,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2023-09-12",
+        "entry_date": "2023-09-13",
+        "entry_price": 107.1276,
+        "exit_date": "2023-10-20",
+        "exit_price": 110.8938,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.035156,
+        "net_return": 0.029156,
+        "stock": "2327"
+      },
+      {
+        "signal_date": "2020-07-02",
+        "entry_date": "2020-07-03",
+        "entry_price": 73.7,
+        "exit_date": "2020-07-08",
+        "exit_price": 69.5,
+        "exit_reason": "hard_stop",
+        "gross_return": -0.056988,
+        "net_return": -0.062988,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2021-11-08",
+        "entry_date": "2021-11-09",
+        "entry_price": 107.5,
+        "exit_date": "2021-11-24",
+        "exit_price": 103.0,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.04186,
+        "net_return": -0.04786,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2022-12-01",
+        "entry_date": "2022-12-02",
+        "entry_price": 100.0,
+        "exit_date": "2022-12-16",
+        "exit_price": 96.2,
+        "exit_reason": "trend_exit",
+        "gross_return": -0.038,
+        "net_return": -0.044,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2023-11-13",
+        "entry_date": "2023-11-14",
+        "entry_price": 123.5,
+        "exit_date": "2024-01-03",
+        "exit_price": 126.5,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.024291,
+        "net_return": 0.018291,
+        "stock": "3711"
+      },
+      {
+        "signal_date": "2024-05-23",
+        "entry_date": "2024-05-24",
+        "entry_price": 159.5,
+        "exit_date": "2024-07-01",
+        "exit_price": 164.5,
+        "exit_reason": "trend_exit",
+        "gross_return": 0.031348,
+        "net_return": 0.025348,
+        "stock": "3711"
+      }
+    ]
+  },
+  "blocked_analysis": {
+    "blocked_count": 10,
+    "mean_next_day_gross_return": -0.007294,
+    "mean_hypothetical_swing_net_return": -0.022228,
+    "hypothetical_winners": 3,
+    "details": [
+      {
+        "stock": "2330",
+        "signal_date": "2023-11-13",
+        "entry_date": "2023-11-14",
+        "entry_price": 576.0,
+        "filter_exit_price": 572.0,
+        "filter_net_return": -0.012944,
+        "next_day_gross_return": 0.008681,
+        "hypothetical_swing": {
+          "entry_date": "2023-11-14",
+          "exit_date": "2023-12-05",
+          "exit_reason": "trend_exit",
+          "net_return": -0.016417
+        }
+      },
+      {
+        "stock": "2308",
+        "signal_date": "2020-10-27",
+        "entry_date": "2020-10-28",
+        "entry_price": 202.5,
+        "filter_exit_price": 200.5,
+        "filter_net_return": -0.015877,
+        "next_day_gross_return": -0.037037,
+        "hypothetical_swing": {
+          "entry_date": "2020-10-28",
+          "exit_date": "2020-10-29",
+          "exit_reason": "hard_stop",
+          "net_return": -0.043037
+        }
+      },
+      {
+        "stock": "2308",
+        "signal_date": "2022-07-28",
+        "entry_date": "2022-07-29",
+        "entry_price": 263.5,
+        "filter_exit_price": 258.0,
+        "filter_net_return": -0.026873,
+        "next_day_gross_return": -0.018975,
+        "hypothetical_swing": {
+          "entry_date": "2022-07-29",
+          "exit_date": "2022-08-29",
+          "exit_reason": "trend_exit",
+          "net_return": -0.009795
+        }
+      },
+      {
+        "stock": "2345",
+        "signal_date": "2024-01-22",
+        "entry_date": "2024-01-23",
+        "entry_price": 539.0,
+        "filter_exit_price": 522.0,
+        "filter_net_return": -0.03754,
+        "next_day_gross_return": -0.03154,
+        "hypothetical_swing": {
+          "entry_date": "2024-01-23",
+          "exit_date": "2024-01-25",
+          "exit_reason": "trend_exit",
+          "net_return": -0.054237
+        }
+      },
+      {
+        "stock": "2327",
+        "signal_date": "2023-04-12",
+        "entry_date": "2023-04-13",
+        "entry_price": 114.66,
+        "filter_exit_price": 113.4046,
+        "filter_net_return": -0.016949,
+        "next_day_gross_return": 0.009124,
+        "hypothetical_swing": {
+          "entry_date": "2023-04-13",
+          "exit_date": "2023-04-20",
+          "exit_reason": "hard_stop",
+          "net_return": -0.060745
+        }
+      },
+      {
+        "stock": "2327",
+        "signal_date": "2023-09-12",
+        "entry_date": "2023-09-13",
+        "entry_price": 107.1276,
+        "filter_exit_price": 105.8722,
+        "filter_net_return": -0.017719,
+        "next_day_gross_return": 0.0,
+        "hypothetical_swing": {
+          "entry_date": "2023-09-13",
+          "exit_date": "2023-10-20",
+          "exit_reason": "trend_exit",
+          "net_return": 0.029156
+        }
+      },
+      {
+        "stock": "3711",
+        "signal_date": "2020-07-02",
+        "entry_date": "2020-07-03",
+        "entry_price": 73.7,
+        "filter_exit_price": 71.9,
+        "filter_net_return": -0.030423,
+        "next_day_gross_return": -0.028494,
+        "hypothetical_swing": {
+          "entry_date": "2020-07-03",
+          "exit_date": "2020-07-08",
+          "exit_reason": "hard_stop",
+          "net_return": -0.062988
+        }
+      },
+      {
+        "stock": "3711",
+        "signal_date": "2021-11-08",
+        "entry_date": "2021-11-09",
+        "entry_price": 107.5,
+        "filter_exit_price": 105.0,
+        "filter_net_return": -0.029256,
+        "next_day_gross_return": -0.032558,
+        "hypothetical_swing": {
+          "entry_date": "2021-11-09",
+          "exit_date": "2021-11-24",
+          "exit_reason": "trend_exit",
+          "net_return": -0.04786
+        }
+      },
+      {
+        "stock": "3711",
+        "signal_date": "2023-11-13",
+        "entry_date": "2023-11-14",
+        "entry_price": 123.5,
+        "filter_exit_price": 123.5,
+        "filter_net_return": -0.006,
+        "next_day_gross_return": 0.020243,
+        "hypothetical_swing": {
+          "entry_date": "2023-11-14",
+          "exit_date": "2024-01-03",
+          "exit_reason": "trend_exit",
+          "net_return": 0.018291
+        }
+      },
+      {
+        "stock": "3711",
+        "signal_date": "2024-05-23",
+        "entry_date": "2024-05-24",
+        "entry_price": 159.5,
+        "filter_exit_price": 159.5,
+        "filter_net_return": -0.006,
+        "next_day_gross_return": 0.037618,
+        "hypothetical_swing": {
+          "entry_date": "2024-05-24",
+          "exit_date": "2024-07-01",
+          "exit_reason": "trend_exit",
+          "net_return": 0.025348
+        }
+      }
+    ]
+  }
+}
