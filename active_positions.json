@@ -36,7 +36,7 @@
     "ma10": 59.66,
     "ma20": 59.22,
     "suggested_lots": 16,
-    "remaining_lots": 16,
+    "remaining_lots": 0,
     "capital_used": 1008000,
     "capital_pct": 33.6,
     "max_loss_twd": 30319,
@@ -47,7 +47,7 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "tp3_alerted": false,
-    "status": "HOLDING",
+    "status": "STOPPED_OUT",
     "actual_entry_price": 63.7,
     "entry_time": "2026-10-28 03:59:42"
   },
