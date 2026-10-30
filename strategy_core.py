@@ -336,15 +336,17 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     # 僅受 market_ok、基本有效性（MV20/價格）與法人閘門約束（與 S2 相同；
     # 重測口徑為 XQ 訊號 + 主系統閘門，不另設 XQ 大盤濾網/5 日均量門檻）。
     # 停損 = S2 式 max(訊號日低點 x0.995, 進場 x0.975)（重測假設，凍結為實盤停損）。
+    # 間隔計算必須與夜班 loop_turtle 完全一致：只計位置 >= 100 的前次同條件日
+    # （loop_turtle 從 i=100 起算，100 根之前的同條件日不計入間隔，否則會誤殺首現訊號）。
     if len(df) >= 101:
         high_roll_max = df["High"].rolling(100).max()
         is_100_high = (df["High"] == high_roll_max)
         if bool(is_100_high.iloc[-1]):
-            prior = is_100_high.iloc[:-1]
+            prior = is_100_high.iloc[100:-1]
             if not prior.any():
                 c21_hit = True
             else:
-                prior_idx = int(np.where(prior.values)[0][-1])
+                prior_idx = 100 + int(np.where(prior.values)[0][-1])
                 c21_hit = ((len(df) - 1 - prior_idx) > 100)
             if c21_hit:
                 entry = round(float(cur["Close"]), 2)
