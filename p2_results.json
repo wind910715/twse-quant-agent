@@ -1,0 +1,119 @@
+{
+  "design": {
+    "universe": "build_dynamic_index_universe()[:220] (same as backtest.py)",
+    "window": "2020-01-01 ~ latest (yfinance)",
+    "flat": "production: 20% weight each, 5-position count cap only",
+    "real": "calc_position_size capital_pct weight, 5-position cap + 100% capital cap",
+    "verdict_rule": "real MDD worse than flat MDD by >5pp => 35% cap too aggressive"
+  },
+  "generated_at": "2026-10-30 13:13:42",
+  "modes": {
+    "flat": {
+      "trades": 1169,
+      "win_rate": 52.0,
+      "rr_ratio": 2.05,
+      "avg_win_pct": 5.93,
+      "avg_loss_pct": -2.89,
+      "cum_return_pct": 4728.82,
+      "mdd_pct": -18.12,
+      "by_strategy": {
+        "S0_VCP收斂": {
+          "trades": 58,
+          "win_rate": 50.0,
+          "avg_return_pct": 2.23
+        },
+        "S1_破底翻": {
+          "trades": 49,
+          "win_rate": 65.3,
+          "avg_return_pct": 2.91
+        },
+        "S2_量增突破": {
+          "trades": 896,
+          "win_rate": 51.2,
+          "avg_return_pct": 1.51
+        },
+        "C21_烏龜買進": {
+          "trades": 37,
+          "win_rate": 40.5,
+          "avg_return_pct": 1.43
+        },
+        "C02_領先創新高": {
+          "trades": 129,
+          "win_rate": 56.6,
+          "avg_return_pct": 2.37
+        }
+      },
+      "first_half": {
+        "trades": 584,
+        "win_rate": 48.6,
+        "avg_return_pct": 1.23
+      },
+      "second_half": {
+        "trades": 585,
+        "win_rate": 55.4,
+        "avg_return_pct": 2.16
+      },
+      "max_concurrent_cap_pct": 442.7,
+      "censored": 8,
+      "skipped_full": 1807,
+      "skipped_busy": 689,
+      "skipped_capital": 0
+    },
+    "real": {
+      "trades": 918,
+      "win_rate": 50.3,
+      "rr_ratio": 2.06,
+      "avg_win_pct": 6.01,
+      "avg_loss_pct": -2.92,
+      "cum_return_pct": 8227.88,
+      "mdd_pct": -27.1,
+      "by_strategy": {
+        "S0_VCP收斂": {
+          "trades": 47,
+          "win_rate": 48.9,
+          "avg_return_pct": 2.12
+        },
+        "S1_破底翻": {
+          "trades": 35,
+          "win_rate": 57.1,
+          "avg_return_pct": 1.66
+        },
+        "S2_量增突破": {
+          "trades": 710,
+          "win_rate": 50.3,
+          "avg_return_pct": 1.51
+        },
+        "C21_烏龜買進": {
+          "trades": 29,
+          "win_rate": 37.9,
+          "avg_return_pct": 1.14
+        },
+        "C02_領先創新高": {
+          "trades": 97,
+          "win_rate": 52.6,
+          "avg_return_pct": 1.86
+        }
+      },
+      "first_half": {
+        "trades": 459,
+        "win_rate": 48.1,
+        "avg_return_pct": 1.17
+      },
+      "second_half": {
+        "trades": 459,
+        "win_rate": 52.5,
+        "avg_return_pct": 1.98
+      },
+      "max_concurrent_cap_pct": 408.9,
+      "censored": 6,
+      "skipped_full": 1285,
+      "skipped_busy": 532,
+      "skipped_capital": 932
+    }
+  },
+  "verdict": {
+    "real_mdd_worse_by_pp": 8.98,
+    "cap_too_aggressive": true,
+    "note": "cap_too_aggressive True => 35% cap too aggressive, lower cap or reduce count first."
+  }
+}
