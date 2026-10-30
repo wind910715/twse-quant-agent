@@ -1,0 +1,54 @@
+name: VPVR MA Backtest v1 (manual only)
+
+# 量＋均線策略回測 v1（VPVR 支撐版，實驗分支專用）。
+# 不動 main、不動 monitor/screener、不寫 latest_backtest.json、純回測。
+# 資料：價格與量用 yfinance 現場下載（公開資料，無金鑰）。
+# 僅產出 exp_vpvr_ma/vpvr_ma_results.json / vpvr_ma_report.md。
+# 注意：結果推回分支時絕不 rebase 到 main，一律直接 push HEAD 到本分支，
+# 失敗要大聲失敗，不得用 || true 吞掉。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run VPVR MA backtest v1 (full universe, spec frozen 2026-10-30)
+        run: python exp_vpvr_ma/vpvr_ma_backtest.py
+
+      - name: Commit results back to this branch
+        run: |
+          git config --local user.email "quant-bot@github.com"
+          git config --local user.name "Quant Task Agent"
+          git add exp_vpvr_ma/vpvr_ma_results.json exp_vpvr_ma/vpvr_ma_report.md
+          if ! git diff --staged --quiet; then
+            git commit -m "VPVR MA backtest v1 results $(date +'%Y-%m-%d %H:%M')"
+            git push origin HEAD:exp/vpvr-ma-v1
+          fi
+
+      - name: Upload results as artifact (backup if push fails)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vpvr-ma-results
+          path: |
+            exp_vpvr_ma/vpvr_ma_results.json
+            exp_vpvr_ma/vpvr_ma_report.md
+          if-no-files-found: error
