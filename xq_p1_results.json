@@ -1,0 +1,308 @@
+{
+  "design": {
+    "universe": "build_dynamic_index_universe()[:220] (same as backtest.py)",
+    "window": "2020-01-01 ~ latest (yfinance)",
+    "entry": "next-day confirmation (same as backtest.py)",
+    "exit": "strategy_core.simulate_exit (TP1/2/3, trailing, 3d weak, MAX_HOLD 55)",
+    "costs": "BUY 0.1425% + per-segment SELL 0.4425% (via simulate_exit)",
+    "portfolio": "max 5 concurrent, 20% weight each, no re-entry while holding",
+    "priority": "S0 > S1 > S2 > C21 > C02 > S02",
+    "p1_priority": "S0 > S1 > C21 > C02 > S2 (flipped; S0/S1 stay first, S02 still last)",
+    "p1_control": "same-run original combined; no universe drift (same signals, universe, data)",
+    "new_stop_rule": "max(signal-day low x0.995, signal close x0.975) [S2-style assumption]",
+    "c02_note": "C02 XQ spec = 60d hold; capped at MAX_HOLD 55d by engine",
+    "chip_filter": "NOT applied (require_chip=False, same as Saturday backtest)",
+    "survivorship": "universe = current list, NOT point-in-time (same limitation as main backtest)"
+  },
+  "new_signal_attrition": {
+    "C21": {
+      "csv_signals": 1702,
+      "in_sample_gated": 463,
+      "skipped_no_data": 0,
+      "skipped_gate": 148
+    },
+    "C02": {
+      "csv_signals": 2758,
+      "in_sample_gated": 729,
+      "skipped_no_data": 0,
+      "skipped_gate": 193
+    },
+    "S02": {
+      "csv_signals": 356,
+      "in_sample_gated": 112,
+      "skipped_no_data": 0,
+      "skipped_gate": 34
+    }
+  },
+  "overlap": {
+    "C21": {
+      "signals": 181,
+      "overlap_same_day": 0,
+      "overlap_pct": 0.0
+    },
+    "C02": {
+      "signals": 444,
+      "overlap_same_day": 0,
+      "overlap_pct": 0.0
+    },
+    "S02": {
+      "signals": 107,
+      "overlap_same_day": 0,
+      "overlap_pct": 0.0
+    }
+  },
+  "runs": {
+    "baseline_S0S1S2": {
+      "trades": 1147,
+      "win_rate": 53.3,
+      "avg_return_pct": 1.7573,
+      "rr_ratio": 1.9872,
+      "avg_win_pct": 5.9062,
+      "avg_loss_pct": -2.9721,
+      "cum_return_pct": 5052.08,
+      "mdd_pct": -17.39,
+      "first_half": {
+        "trades": 573,
+        "avg_return_pct": 1.2896
+      },
+      "second_half": {
+        "trades": 574,
+        "avg_return_pct": 2.2243
+      },
+      "skipped_portfolio_full": 1329,
+      "skipped_stock_busy": 510,
+      "censored_excluded": 8,
+      "by_strategy": {
+        "S0_VCP收斂": {
+          "trades": 63,
+          "win_rate": 50.8,
+          "avg_return_pct": 2.1
+        },
+        "S1_破底翻": {
+          "trades": 53,
+          "win_rate": 66.0,
+          "avg_return_pct": 3.1598
+        },
+        "S2_量增突破": {
+          "trades": 1031,
+          "win_rate": 52.8,
+          "avg_return_pct": 1.6643
+        }
+      }
+    },
+    "C21_only": {
+      "trades": 82,
+      "win_rate": 42.7,
+      "avg_return_pct": 1.4435,
+      "rr_ratio": 2.9501,
+      "avg_win_pct": 6.2077,
+      "avg_loss_pct": -2.1043,
+      "cum_return_pct": 25.91,
+      "mdd_pct": -7.26,
+      "first_half": {
+        "trades": 41,
+        "avg_return_pct": 0.9885
+      },
+      "second_half": {
+        "trades": 41,
+        "avg_return_pct": 1.8985
+      },
+      "skipped_portfolio_full": 2,
+      "skipped_stock_busy": 0,
+      "censored_excluded": 0,
+      "by_strategy": {
+        "C21": {
+          "trades": 82,
+          "win_rate": 42.7,
+          "avg_return_pct": 1.4435
+        }
+      }
+    },
+    "C02_only": {
+      "trades": 171,
+      "win_rate": 46.2,
+      "avg_return_pct": 1.2041,
+      "rr_ratio": 2.0333,
+      "avg_win_pct": 6.1001,
+      "avg_loss_pct": -3.0001,
+      "cum_return_pct": 49.11,
+      "mdd_pct": -7.9,
+      "first_half": {
+        "trades": 85,
+        "avg_return_pct": 1.8811
+      },
+      "second_half": {
+        "trades": 86,
+        "avg_return_pct": 0.535
+      },
+      "skipped_portfolio_full": 0,
+      "skipped_stock_busy": 0,
+      "censored_excluded": 0,
+      "by_strategy": {
+        "C02": {
+          "trades": 171,
+          "win_rate": 46.2,
+          "avg_return_pct": 1.2041
+        }
+      }
+    },
+    "S02_only": {
+      "trades": 46,
+      "win_rate": 60.9,
+      "avg_return_pct": 1.9207,
+      "rr_ratio": 1.7121,
+      "avg_win_pct": 5.0525,
+      "avg_loss_pct": -2.9511,
+      "cum_return_pct": 18.98,
+      "mdd_pct": -2.1,
+      "first_half": {
+        "trades": 23,
+        "avg_return_pct": 2.1904
+      },
+      "second_half": {
+        "trades": 23,
+        "avg_return_pct": 1.6509
+      },
+      "skipped_portfolio_full": 14,
+      "skipped_stock_busy": 0,
+      "censored_excluded": 0,
+      "by_strategy": {
+        "S02": {
+          "trades": 46,
+          "win_rate": 60.9,
+          "avg_return_pct": 1.9207
+        }
+      }
+    },
+    "combined_all6": {
+      "trades": 1141,
+      "win_rate": 52.7,
+      "avg_return_pct": 1.7746,
+      "rr_ratio": 2.055,
+      "avg_win_pct": 5.9867,
+      "avg_loss_pct": -2.9132,
+      "cum_return_pct": 5144.5,
+      "mdd_pct": -15.12,
+      "first_half": {
+        "trades": 570,
+        "avg_return_pct": 1.3136
+      },
+      "second_half": {
+        "trades": 571,
+        "avg_return_pct": 2.2349
+      },
+      "skipped_portfolio_full": 1617,
+      "skipped_stock_busy": 543,
+      "censored_excluded": 8,
+      "by_strategy": {
+        "C02": {
+          "trades": 47,
+          "win_rate": 57.4,
+          "avg_return_pct": 2.6651
+        },
+        "C21": {
+          "trades": 30,
+          "win_rate": 43.3,
+          "avg_return_pct": 1.53
+        },
+        "S02": {
+          "trades": 21,
+          "win_rate": 57.1,
+          "avg_return_pct": 1.6319
+        },
+        "S0_VCP收斂": {
+          "trades": 62,
+          "win_rate": 51.6,
+          "avg_return_pct": 2.1858
+        },
+        "S1_破底翻": {
+          "trades": 51,
+          "win_rate": 66.7,
+          "avg_return_pct": 3.3029
+        },
+        "S2_量增突破": {
+          "trades": 930,
+          "win_rate": 51.9,
+          "avg_return_pct": 1.6295
+        }
+      }
+    },
+    "combined_flip": {
+      "trades": 1141,
+      "win_rate": 52.7,
+      "avg_return_pct": 1.7746,
+      "rr_ratio": 2.055,
+      "avg_win_pct": 5.9867,
+      "avg_loss_pct": -2.9132,
+      "cum_return_pct": 5144.5,
+      "mdd_pct": -15.12,
+      "first_half": {
+        "trades": 570,
+        "avg_return_pct": 1.3136
+      },
+      "second_half": {
+        "trades": 571,
+        "avg_return_pct": 2.2349
+      },
+      "skipped_portfolio_full": 1617,
+      "skipped_stock_busy": 543,
+      "censored_excluded": 8,
+      "by_strategy": {
+        "C02": {
+          "trades": 59,
+          "win_rate": 52.5,
+          "avg_return_pct": 1.9285
+        },
+        "C21": {
+          "trades": 55,
+          "win_rate": 50.9,
+          "avg_return_pct": 1.5169
+        },
+        "S02": {
+          "trades": 21,
+          "win_rate": 57.1,
+          "avg_return_pct": 1.6319
+        },
+        "S0_VCP收斂": {
+          "trades": 62,
+          "win_rate": 51.6,
+          "avg_return_pct": 2.1858
+        },
+        "S1_破底翻": {
+          "trades": 51,
+          "win_rate": 66.7,
+          "avg_return_pct": 3.3029
+        },
+        "S2_量增突破": {
+          "trades": 893,
+          "win_rate": 52.0,
+          "avg_return_pct": 1.6679
+        }
+      }
+    }
+  },
+  "assessment": {
+    "C21": {
+      "standalone_pass_main_standard": true
+    },
+    "C02": {
+      "standalone_pass_main_standard": true
+    },
+    "S02": {
+      "standalone_pass_main_standard": false
+    },
+    "combined_improves": true,
+    "p1": {
+      "flipped_beats_original": false,
+      "flipped_cum": 5144.5,
+      "original_cum": 5144.5,
+      "flipped_mdd": -15.12,
+      "original_mdd": -15.12,
+      "flipped_rr": 2.055,
+      "original_rr": 2.055,
+      "flipped_first": 1.3136,
+      "flipped_second": 2.2349
+    }
+  },
+  "generated_at": "2026-10-30 02:58:26"
+}
