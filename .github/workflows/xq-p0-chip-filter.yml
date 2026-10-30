@@ -1,0 +1,55 @@
+name: XQ P0 Chip Filter (manual only)
+
+# P0 法人濾網回測 (2026-10-30 使用者拍板): 同一 run、同一宇宙、同一資料、同一訊號,
+# 僅法人濾網不同 (無濾網 vs FinMind 三大法人濾網),另以 TW-only 組作為實盤可複製判定。
+# 實驗分支專用: 不動 main、不動 monitor/screener、不寫 latest_backtest.json、
+# 不發 TG、不下單。僅產出 p0_results.json / p0_report.md。
+# 注意: 法人資料檔 xq_signals/chip_daily.csv 由本地 FinMind 抓取後隨分支提交,
+# Actions 離線讀檔 (GitHub 無 FinMind 金鑰,不得現場抓取)。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  p0:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run XQ P0 chip-filter backtest
+        run: python p0_backtest.py
+
+      - name: Commit results back to this branch
+        # Push HEAD explicitly to this branch; fail loudly if not fast-forward.
+        # (Never rebase onto origin HEAD: that rebased an exp branch onto main,
+        # conflicted, and left run 40892700237 green with results lost.)
+        run: |
+          git config --local user.email "quant-bot@github.com"
+          git config --local user.name "Quant Task Agent"
+          git add p0_results.json p0_report.md
+          if ! git diff --staged --quiet; then
+            git commit -m "XQ P0 chip-filter results $(date +'%Y-%m-%d %H:%M')"
+            git push origin HEAD:exp/p0-chip-filter
+          fi
+
+      - name: Upload results as artifact (backup if push fails)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xq-p0-results
+          path: |
+            p0_results.json
+            p0_report.md
+          if-no-files-found: error
