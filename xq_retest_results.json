@@ -1,0 +1,242 @@
+{
+  "design": {
+    "universe": "build_dynamic_index_universe()[:220] (same as backtest.py)",
+    "window": "2020-01-01 ~ latest (yfinance)",
+    "entry": "next-day confirmation (same as backtest.py)",
+    "exit": "strategy_core.simulate_exit (TP1/2/3, trailing, 3d weak, MAX_HOLD 55)",
+    "costs": "BUY 0.1425% + per-segment SELL 0.4425% (via simulate_exit)",
+    "portfolio": "max 5 concurrent, 20% weight each, no re-entry while holding",
+    "priority": "S0 > S1 > S2 > C21 > C02 > S02",
+    "new_stop_rule": "max(signal-day low x0.995, signal close x0.975) [S2-style assumption]",
+    "c02_note": "C02 XQ spec = 60d hold; capped at MAX_HOLD 55d by engine",
+    "chip_filter": "NOT applied (require_chip=False, same as Saturday backtest)",
+    "survivorship": "universe = current list, NOT point-in-time (same limitation as main backtest)"
+  },
+  "new_signal_attrition": {
+    "C21": {
+      "csv_signals": 1702,
+      "in_sample_gated": 463,
+      "skipped_no_data": 0,
+      "skipped_gate": 148
+    },
+    "C02": {
+      "csv_signals": 2758,
+      "in_sample_gated": 729,
+      "skipped_no_data": 0,
+      "skipped_gate": 193
+    },
+    "S02": {
+      "csv_signals": 356,
+      "in_sample_gated": 112,
+      "skipped_no_data": 0,
+      "skipped_gate": 34
+    }
+  },
+  "overlap": {
+    "C21": {
+      "signals": 181,
+      "overlap_same_day": 0,
+      "overlap_pct": 0.0
+    },
+    "C02": {
+      "signals": 444,
+      "overlap_same_day": 0,
+      "overlap_pct": 0.0
+    },
+    "S02": {
+      "signals": 107,
+      "overlap_same_day": 0,
+      "overlap_pct": 0.0
+    }
+  },
+  "runs": {
+    "baseline_S0S1S2": {
+      "trades": 1148,
+      "win_rate": 53.5,
+      "avg_return_pct": 1.7922,
+      "rr_ratio": 2.0034,
+      "avg_win_pct": 5.9214,
+      "avg_loss_pct": -2.9556,
+      "cum_return_pct": 5498.31,
+      "mdd_pct": -17.81,
+      "first_half": {
+        "trades": 574,
+        "avg_return_pct": 1.3164
+      },
+      "second_half": {
+        "trades": 574,
+        "avg_return_pct": 2.268
+      },
+      "skipped_portfolio_full": 1336,
+      "skipped_stock_busy": 513,
+      "censored_excluded": 8,
+      "by_strategy": {
+        "S0_VCP收斂": {
+          "trades": 63,
+          "win_rate": 50.8,
+          "avg_return_pct": 2.1
+        },
+        "S1_破底翻": {
+          "trades": 53,
+          "win_rate": 66.0,
+          "avg_return_pct": 3.1598
+        },
+        "S2_量增突破": {
+          "trades": 1032,
+          "win_rate": 53.0,
+          "avg_return_pct": 1.7032
+        }
+      }
+    },
+    "C21_only": {
+      "trades": 81,
+      "win_rate": 43.2,
+      "avg_return_pct": 1.4895,
+      "rr_ratio": 2.9554,
+      "avg_win_pct": 6.2077,
+      "avg_loss_pct": -2.1004,
+      "cum_return_pct": 26.49,
+      "mdd_pct": -7.26,
+      "first_half": {
+        "trades": 40,
+        "avg_return_pct": 1.0702
+      },
+      "second_half": {
+        "trades": 41,
+        "avg_return_pct": 1.8985
+      },
+      "skipped_portfolio_full": 2,
+      "skipped_stock_busy": 0,
+      "censored_excluded": 0,
+      "by_strategy": {
+        "C21": {
+          "trades": 81,
+          "win_rate": 43.2,
+          "avg_return_pct": 1.4895
+        }
+      }
+    },
+    "C02_only": {
+      "trades": 170,
+      "win_rate": 46.5,
+      "avg_return_pct": 1.2246,
+      "rr_ratio": 2.028,
+      "avg_win_pct": 6.1001,
+      "avg_loss_pct": -3.008,
+      "cum_return_pct": 49.79,
+      "mdd_pct": -7.9,
+      "first_half": {
+        "trades": 85,
+        "avg_return_pct": 1.8811
+      },
+      "second_half": {
+        "trades": 85,
+        "avg_return_pct": 0.5681
+      },
+      "skipped_portfolio_full": 0,
+      "skipped_stock_busy": 0,
+      "censored_excluded": 0,
+      "by_strategy": {
+        "C02": {
+          "trades": 170,
+          "win_rate": 46.5,
+          "avg_return_pct": 1.2246
+        }
+      }
+    },
+    "S02_only": {
+      "trades": 46,
+      "win_rate": 60.9,
+      "avg_return_pct": 1.9207,
+      "rr_ratio": 1.7121,
+      "avg_win_pct": 5.0525,
+      "avg_loss_pct": -2.9511,
+      "cum_return_pct": 18.98,
+      "mdd_pct": -2.1,
+      "first_half": {
+        "trades": 23,
+        "avg_return_pct": 2.1904
+      },
+      "second_half": {
+        "trades": 23,
+        "avg_return_pct": 1.6509
+      },
+      "skipped_portfolio_full": 14,
+      "skipped_stock_busy": 0,
+      "censored_excluded": 0,
+      "by_strategy": {
+        "S02": {
+          "trades": 46,
+          "win_rate": 60.9,
+          "avg_return_pct": 1.9207
+        }
+      }
+    },
+    "combined_all6": {
+      "trades": 1139,
+      "win_rate": 53.0,
+      "avg_return_pct": 1.8211,
+      "rr_ratio": 2.0705,
+      "avg_win_pct": 6.0017,
+      "avg_loss_pct": -2.8986,
+      "cum_return_pct": 5686.47,
+      "mdd_pct": -14.58,
+      "first_half": {
+        "trades": 569,
+        "avg_return_pct": 1.3541
+      },
+      "second_half": {
+        "trades": 570,
+        "avg_return_pct": 2.2873
+      },
+      "skipped_portfolio_full": 1625,
+      "skipped_stock_busy": 546,
+      "censored_excluded": 8,
+      "by_strategy": {
+        "C02": {
+          "trades": 47,
+          "win_rate": 57.4,
+          "avg_return_pct": 2.6651
+        },
+        "C21": {
+          "trades": 29,
+          "win_rate": 44.8,
+          "avg_return_pct": 1.6614
+        },
+        "S02": {
+          "trades": 21,
+          "win_rate": 57.1,
+          "avg_return_pct": 1.6319
+        },
+        "S0_VCP收斂": {
+          "trades": 61,
+          "win_rate": 52.5,
+          "avg_return_pct": 2.2641
+        },
+        "S1_破底翻": {
+          "trades": 51,
+          "win_rate": 66.7,
+          "avg_return_pct": 3.3029
+        },
+        "S2_量增突破": {
+          "trades": 930,
+          "win_rate": 52.3,
+          "avg_return_pct": 1.6774
+        }
+      }
+    }
+  },
+  "assessment": {
+    "C21": {
+      "standalone_pass_main_standard": true
+    },
+    "C02": {
+      "standalone_pass_main_standard": true
+    },
+    "S02": {
+      "standalone_pass_main_standard": false
+    },
+    "combined_improves": true
+  },
+  "generated_at": "2026-10-30 00:59:53"
+}
