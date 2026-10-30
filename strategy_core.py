@@ -45,8 +45,11 @@ CONFIG = {
 #   現行: S0 VCP收斂 / S1 破底翻 / S2 量增突破。
 #   另定：盤中觸及觸發價即買進（monitor 原有行為，不加尾盤確認）；觸發當下 monitor
 #   立即發 TG 通知（含完整進出場劇本），不批次、不延遲。
+# v3.7 (2026-10-30, 使用者拍板): 併入 XQ 夜班通過者 C21 烏龜買進、C02 領先大盤創新高
+#   （主系統引擎重測過關：C21 RR 2.9554、C02 RR 2.028、combined 優於 baseline；S02 RR 1.7121 未過剃除不併入）。
+#   優先序：S0 > S1 > S2 > C21 > C02（既有優先，與重測口徑一致）；新策略停損皆採 S2 式（重測假設凍結）。
 STRATEGY_NAMES = [
-    "S0_VCP收斂", "S1_破底翻", "S2_量增突破",
+    "S0_VCP收斂", "S1_破底翻", "S2_量增突破", "C21_烏龜買進", "C02_領先創新高",
 ]
 
 
@@ -223,7 +226,8 @@ def calc_exit_plan(entry: float, hard_stop: float, total_lots: int) -> dict:
 # ---------------------------------------------------------------- strategy evaluation (SSOT)
 def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
                        chip_info: dict | None, bench_ret_20d: float,
-                       market_ok: bool = True, require_chip: bool | None = None) -> list:
+                       market_ok: bool = True, require_chip: bool | None = None,
+                       bench_series: pd.Series | None = None) -> list:
     """
     唯一策略評估函數。df_raw 為「截至訊號日為止」的 OHLCV (最後一列 = 訊號日)，
     回測以 df.iloc[:i+1] 切片呼叫、實盤以最新資料呼叫，邏輯完全相同。
@@ -231,6 +235,8 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     require_chip=None 時使用 CONFIG["REQUIRE_CHIP_DATA"] (實盤預設 True)。
     回測因無歷史法人資料傳入 False，所有訊號會被標記 chip_unverified=True，
     報表必須揭露，不能假裝測過法人濾網。
+    bench_series 為加權收盤序列 (DatetimeIndex)，僅供 C02 使用；未提供時跳過 C02，
+    不影響 S0/S1/S2/C21（呼叫端傳入完整序列，本函數以日期交集截斷至訊號日，無前視）。
     """
     if require_chip is None:
         require_chip = CONFIG["REQUIRE_CHIP_DATA"]
@@ -316,13 +322,60 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(cur["Low"] * 0.996, entry * 0.975)), 2)
         matched.append(("S1_破底翻", entry, stop))
 
-    # S2_量增突破 (v3.4 併入，原 BRK20): 優先序最低 (同日同股與 S 策略同發時 S 優先, 與驗證版 MERGED 口徑一致)。
+    # S2_量增突破 (v3.4 併入，原 BRK20): 優先序在 S0/S1 之後、C21/C02 之前
+    # (同日同股多策略時取優先序第一個，S2 不再是最低，C21/C02 在後)。
     # 停損 = max(訊號日低點 x0.995, 進場 x0.975); 驗證版以隔日 trigger 計地板, 差異僅出現在
     # 跳空且結構停損較淺的子集 (<=0.3%), 已於 CHANGES_V34.md 揭露。
     if brk_hit:
         entry = round(float(cur["Close"]), 2)
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
         matched.append(("S2_量增突破", entry, stop))
+
+    # C21_烏龜買進 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
+    # 今日最高價 = 100 日最高價（含今日）且上一次同條件距今日 > 100 根（無前次則為首現）。
+    # 僅受 market_ok、基本有效性（MV20/價格）與法人閘門約束（與 S2 相同；
+    # 重測口徑為 XQ 訊號 + 主系統閘門，不另設 XQ 大盤濾網/5 日均量門檻）。
+    # 停損 = S2 式 max(訊號日低點 x0.995, 進場 x0.975)（重測假設，凍結為實盤停損）。
+    # 間隔計算必須與夜班 loop_turtle 完全一致：只計位置 >= 100 的前次同條件日
+    # （loop_turtle 從 i=100 起算，100 根之前的同條件日不計入間隔，否則會誤殺首現訊號）。
+    if len(df) >= 101:
+        high_roll_max = df["High"].rolling(100).max()
+        is_100_high = (df["High"] == high_roll_max)
+        if bool(is_100_high.iloc[-1]):
+            prior = is_100_high.iloc[100:-1]
+            if not prior.any():
+                c21_hit = True
+            else:
+                prior_idx = 100 + int(np.where(prior.values)[0][-1])
+                c21_hit = ((len(df) - 1 - prior_idx) > 100)
+            if c21_hit:
+                entry = round(float(cur["Close"]), 2)
+                stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
+                matched.append(("C21_烏龜買進", entry, stop))
+
+    # C02_領先創新高 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
+    # value1 = 個股收盤 / 加權收盤；up = value1 之 20 日布林上限（均值 + 2x 標準差，ddof=0）；
+    # 連續 3 日（含今日）value1 >= up；加權 5MA > 20MA。
+    # 僅受 market_ok、基本有效性與法人閘門約束。需 bench_series，未提供時跳過 C02。
+    # 停損 = S2 式（重測假設，凍結為實盤停損）。C02 區塊包 try/except：
+    # 加權資料異常時只跳過 C02，絕不可拖垮 S0/S1/S2 或整批選股。
+    if bench_series is not None and len(df) >= 22:
+        try:
+            common_idx = df.index.intersection(bench_series.index)
+            if len(common_idx) >= 22:
+                v1 = (df.loc[common_idx, "Close"] / bench_series.loc[common_idx]).dropna()
+                if len(v1) >= 22:
+                    v_up = v1.rolling(20).mean() + 2.0 * v1.rolling(20).std(ddof=0)
+                    last3 = v1.iloc[-3:]
+                    up3 = v_up.iloc[-3:]
+                    if bool((last3 >= up3).all()) and not up3.isna().any():
+                        tw = bench_series.loc[:df.index[-1]].dropna()
+                        if len(tw) >= 20 and float(tw.iloc[-5:].mean()) > float(tw.iloc[-20:].mean()):
+                            entry = round(float(cur["Close"]), 2)
+                            stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
+                            matched.append(("C02_領先創新高", entry, stop))
+        except Exception:
+            pass
 
     results = []
     trade_d = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])
