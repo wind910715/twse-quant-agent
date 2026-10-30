@@ -28,12 +28,26 @@ jobs:
         run: python xq_main_engine_retest.py
 
       - name: Commit results back to this branch
+        # NOTE 2026-10-30 fix: never rebase onto origin HEAD (default branch).
+        # The previous `git pull --rebase origin HEAD` rebased this experimental
+        # branch onto main, conflicted on sync files, and the swallowed push
+        # failure (|| true) left run 40892700237 green with results lost.
+        # Push HEAD explicitly to this branch; fail loudly if not fast-forward.
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
-          git add xq_retest_results.json xq_retest_report.md || true
+          git add xq_retest_results.json xq_retest_report.md
           if ! git diff --staged --quiet; then
             git commit -m "XQ main-engine retest results $(date +'%Y-%m-%d %H:%M')"
-            git pull --rebase origin HEAD || true
-            git push origin HEAD || true
+            git push origin HEAD:exp/xq-main-engine-retest
           fi
+
+      - name: Upload results as artifact (backup if push fails)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xq-retest-results
+          path: |
+            xq_retest_results.json
+            xq_retest_report.md
+          if-no-files-found: error
