@@ -1,0 +1,53 @@
+name: XQ P1 Priority Flip (manual only)
+
+# P1 優先序翻轉測試 (2026-10-30 使用者拍板): 同一訊號集、同一宇宙、同一資料,
+# 僅優先序改為 S0 > S1 > C21 > C02 > S2,與原 combined 在同一 run 內對照,無宇宙漂移。
+# 實驗分支專用: 不動 main、不動 monitor/screener、不寫 latest_backtest.json、
+# 不發 TG、不下單。僅產出 xq_p1_results.json / xq_p1_report.md。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  p1:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run XQ P1 priority-flip retest
+        run: python xq_main_engine_retest.py
+
+      - name: Commit results back to this branch
+        # Push HEAD explicitly to this branch; fail loudly if not fast-forward.
+        # (Never rebase onto origin HEAD: that rebased an exp branch onto main,
+        # conflicted, and left run 40892700237 green with results lost.)
+        run: |
+          git config --local user.email "quant-bot@github.com"
+          git config --local user.name "Quant Task Agent"
+          git add xq_p1_results.json xq_p1_report.md
+          if ! git diff --staged --quiet; then
+            git commit -m "XQ P1 priority-flip results $(date +'%Y-%m-%d %H:%M')"
+            git push origin HEAD:exp/p1-priority-flip
+          fi
+
+      - name: Upload results as artifact (backup if push fails)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xq-p1-results
+          path: |
+            xq_p1_results.json
+            xq_p1_report.md
+          if-no-files-found: error

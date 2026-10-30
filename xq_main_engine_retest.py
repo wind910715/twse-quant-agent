@@ -32,8 +32,12 @@ xq_main_engine_retest.py — XQ 夜班通過者 (C21/C02/S02) 主系統引擎重
 - 組合約束: 同時持倉上限 5 檔 (每筆權重 20%)、同股持倉期間不重進、
   同日同股只取優先序第一個。優先序: S0 > S1 > S2 > C21 > C02 > S02
   (既有策略優先,新策略只補既有未取的缺口,此為保守的增量測試)。
-- 執行組態 (同一訊號集,五次組合模擬):
-  baseline (S0/S1/S2)、C21-only、C02-only、S02-only、combined (六策略併跑)。
+- P1 優先序翻轉 (2026-10-30 使用者拍板,本程式加測組): 同一訊號集、同一宇宙、
+  同一資料,僅優先序改為 S0 > S1 > C21 > C02 > S2 (S0/S1 保持最前,C21/C02 提前於 S2),
+  與原 combined 在同一 run 內對照,故無宇宙漂移。過關標準見 P1 判定。
+- 執行組態 (同一訊號集,六次組合模擬):
+  baseline (S0/S1/S2)、C21-only、C02-only、S02-only、combined (六策略併跑,原優先序)、
+  combined_flip (六策略併跑,翻轉優先序)。
 - 統計: 每組 n、勝率、平均報酬、RR (平均贏/|平均輸|)、前後半 (按進場日筆數切半)、
   組合累計報酬 (20% 權重複利)、MDD;另計訊號日重疊率 (新策略訊號與 S0/S1/S2
   同股同日) 與 combined 實際執行的新策略筆數。
@@ -65,10 +69,12 @@ MAX_CONCURRENT = CONFIG["MAX_CONCURRENT_POSITIONS"]
 
 # 優先序 (數字越小越優先;既有策略優先於新策略)
 PRIORITY = {"S0_VCP收斂": 0, "S1_破底翻": 1, "S2_量增突破": 2, "C21": 3, "C02": 4, "S02": 5}
+# P1 翻轉優先序 (S0/S1 保持最前,C21/C02 提前於 S2;S02 仍最後)
+PRIORITY_FLIP = {"S0_VCP收斂": 0, "S1_破底翻": 1, "C21": 2, "C02": 3, "S2_量增突破": 4, "S02": 5}
 NEW_FILES = {"C21": "xq_signals/C21.csv", "C02": "xq_signals/C02.csv", "S02": "xq_signals/S02.csv"}
 
-OUT_JSON = "xq_retest_results.json"
-OUT_MD = "xq_retest_report.md"
+OUT_JSON = "xq_p1_results.json"
+OUT_MD = "xq_p1_report.md"
 
 
 def summarize_trades(trades):
@@ -224,6 +230,9 @@ def main():
             print(f"base signals done: {len(dfs)} stocks", flush=True)
     print(f"S0/S1/S2 signals: {sum(1 for v in signals.values() if v['strategy'].startswith('S'))}", flush=True)
 
+    # P1: 翻轉優先序的平行訊號集 (複製既有 S 訊號,新策略以翻轉優先序競爭同日同股)。
+    signals_flip = dict(signals)
+
     # --- C21/C02/S02: 夜班 CSV 訊號 + 主系統閘門 ---
     new_stats = {}
     date_pos_cache = {}
@@ -273,6 +282,8 @@ def main():
             cand = {"date_idx": i, "strategy": strat, "entry_price": entry_price, "hard_stop": hard_stop}
             if key not in signals or PRIORITY[strat] < PRIORITY[signals[key]["strategy"]]:
                 signals[key] = cand
+            if key not in signals_flip or PRIORITY_FLIP[strat] < PRIORITY_FLIP[signals_flip[key]["strategy"]]:
+                signals_flip[key] = cand
             gated.append(cand)
         new_stats[strat] = {"csv_signals": int(raw_n), "in_sample_gated": len(gated),
                             "skipped_no_data": skipped_no_data, "skipped_gate": skipped_gate}
@@ -284,6 +295,11 @@ def main():
         signals_by_stock.setdefault(sid, []).append(sig)
     for sid in signals_by_stock:
         signals_by_stock[sid].sort(key=lambda s: s["date_idx"])
+    signals_by_stock_flip = {}
+    for (sid, i), sig in signals_flip.items():
+        signals_by_stock_flip.setdefault(sid, []).append(sig)
+    for sid in signals_by_stock_flip:
+        signals_by_stock_flip[sid].sort(key=lambda s: s["date_idx"])
 
     # 訊號日重疊: 新策略訊號與 S0/S1/S2 同股同日
     base_keys = {(sid, s["date_idx"]) for sid, lst in signals_by_stock.items()
@@ -312,6 +328,8 @@ def main():
         "costs": "BUY 0.1425% + per-segment SELL 0.4425% (via simulate_exit)",
         "portfolio": "max 5 concurrent, 20% weight each, no re-entry while holding",
         "priority": "S0 > S1 > S2 > C21 > C02 > S02",
+        "p1_priority": "S0 > S1 > C21 > C02 > S2 (flipped; S0/S1 stay first, S02 still last)",
+        "p1_control": "same-run original combined; no universe drift (same signals, universe, data)",
         "new_stop_rule": "max(signal-day low x0.995, signal close x0.975) [S2-style assumption]",
         "c02_note": "C02 XQ spec = 60d hold; capped at MAX_HOLD 55d by engine",
         "chip_filter": "NOT applied (require_chip=False, same as Saturday backtest)",
@@ -326,6 +344,16 @@ def main():
         print(f"RUN {name}: n={summ['trades']} win={summ['win_rate']}% avg={summ['avg_return_pct']} "
               f"RR={summ['rr_ratio']} cum={summ['cum_return_pct']}% MDD={summ['mdd_pct']}%", flush=True)
 
+    # P1 翻轉組 (同一訊號集、同一宇宙、同一資料,僅優先序不同)
+    trades_f, meta_f = simulate_portfolio(signals_by_stock_flip, sample_order, dfs,
+                                          {"S0_VCP收斂", "S1_破底翻", "S2_量增突破", "C21", "C02", "S02"})
+    summ_f = summarize_trades(trades_f)
+    summ_f.update(meta_f)
+    summ_f["by_strategy"] = by_strategy_stats(trades_f)
+    results["runs"]["combined_flip"] = summ_f
+    print(f"RUN combined_flip: n={summ_f['trades']} win={summ_f['win_rate']}% avg={summ_f['avg_return_pct']} "
+          f"RR={summ_f['rr_ratio']} cum={summ_f['cum_return_pct']}% MDD={summ_f['mdd_pct']}%", flush=True)
+
     # 整合判定 (事前宣告門檻,僅供參考)
     base = results["runs"]["baseline_S0S1S2"]
     comb = results["runs"]["combined_all6"]
@@ -338,6 +366,21 @@ def main():
     assessment["combined_improves"] = bool(
         comb["cum_return_pct"] > base["cum_return_pct"]
         and comb["mdd_pct"] >= base["mdd_pct"] - 3.0)
+    # P1 判定 (事前宣告): 翻轉組累計 > 原 combined 累計,且 MDD 不比原 combined 差超過 3pp、
+    # RR 不比原 combined 差、前後半皆正。對照組為同一 run 的原 combined,無宇宙漂移。
+    flip = results["runs"]["combined_flip"]
+    assessment["p1"] = {
+        "flipped_beats_original": bool(
+            flip["cum_return_pct"] > comb["cum_return_pct"]
+            and flip["mdd_pct"] >= comb["mdd_pct"] - 3.0
+            and flip["rr_ratio"] >= comb["rr_ratio"]
+            and flip["first_half"]["avg_return_pct"] > 0 and flip["second_half"]["avg_return_pct"] > 0),
+        "flipped_cum": flip["cum_return_pct"], "original_cum": comb["cum_return_pct"],
+        "flipped_mdd": flip["mdd_pct"], "original_mdd": comb["mdd_pct"],
+        "flipped_rr": flip["rr_ratio"], "original_rr": comb["rr_ratio"],
+        "flipped_first": flip["first_half"]["avg_return_pct"],
+        "flipped_second": flip["second_half"]["avg_return_pct"],
+    }
     results["assessment"] = assessment
     results["generated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -345,7 +388,7 @@ def main():
         json.dump(results, f, ensure_ascii=False, indent=2)
 
     # Markdown 報告
-    lines = [f"# XQ 通過者主系統引擎重測報告 ({results['generated_at']})", "",
+    lines = [f"# XQ P1 優先序翻轉重測報告 ({results['generated_at']})", "",
              "## 設計 (預註冊,跑前凍結)", ""]
     for k, v in results["design"].items():
         lines.append(f"- {k}: {v}")
