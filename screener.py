@@ -257,12 +257,14 @@ def main():
     trade_date, chip_map = fetch_twse_institutional()
     universe = build_dynamic_index_universe()
 
-    tickers = ["0050.TW"] + [f"{sid}{sfx}" for sid, (_, sfx) in universe.items()]
+    tickers = ["0050.TW", "^TWII"] + [f"{sid}{sfx}" for sid, (_, sfx) in universe.items()]
     raw_candidates = []
     bench_ret_20d = 0.0
 
     try:
-        data = yf.download(tickers, period="5mo", group_by="ticker", threads=True, progress=False)
+        # v3.7: 期間改抓 1 年，C21 需 100 日最高價＋間隔回溯（5 個月在邊界上太緊）；
+        # S0/S1/S2 只看尾段視窗，拉長歷史不改變其訊號。
+        data = yf.download(tickers, period="1y", group_by="ticker", threads=True, progress=False)
         bench_close, bench_ma20 = None, None
         if "0050.TW" in data.columns.get_level_values(0):
             b_df = data["0050.TW"].dropna(subset=["Close"])
@@ -270,6 +272,12 @@ def main():
                 bench_ret_20d = (float(b_df["Close"].iloc[-1]) - float(b_df["Close"].iloc[-21])) / float(b_df["Close"].iloc[-21])
                 bench_close = float(b_df["Close"].iloc[-1])
                 bench_ma20 = float(b_df["Close"].rolling(20).mean().iloc[-1])
+        # v3.7: 加權收盤序列供 C02 用；抓不到時 C02 自動跳過，不影響 S0/S1/S2/C21。
+        twii_series = None
+        if "^TWII" in data.columns.get_level_values(0):
+            twii_series = data["^TWII"]["Close"].dropna()
+            if twii_series.empty:
+                twii_series = None
 
         for sid, (sname, sfx) in universe.items():
             t_sym = f"{sid}{sfx}"
@@ -283,7 +291,7 @@ def main():
             if bench_close is not None and len(s_df) > 21:
                 s_ret20 = (float(s_df["Close"].iloc[-1]) - float(s_df["Close"].iloc[-21])) / float(s_df["Close"].iloc[-21])
                 m_ok = market_regime_ok(bench_close, bench_ma20, s_ret20)
-            sigs = evaluate_candidate(data[t_sym], sid, sname, sfx, c_info, bench_ret_20d, market_ok=m_ok)
+            sigs = evaluate_candidate(data[t_sym], sid, sname, sfx, c_info, bench_ret_20d, market_ok=m_ok, bench_series=twii_series)
             raw_candidates.extend(sigs)
     except Exception as e:
         print(f"⚠️ 批次下載異常: {e}")

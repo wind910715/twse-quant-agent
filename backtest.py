@@ -52,7 +52,7 @@ def summarize_rows(rows: list) -> dict:
 def run_portfolio_backtest() -> dict:
     universe = build_dynamic_index_universe()
     sample_items = list(universe.items())[:220]
-    tickers = ["0050.TW"] + [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
+    tickers = ["0050.TW", "^TWII"] + [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
     data = yf.download(tickers, start="2020-01-01", group_by="ticker", threads=True, progress=False)
 
     bench_df = None
@@ -60,6 +60,12 @@ def run_portfolio_backtest() -> dict:
         bench_df = data["0050.TW"].dropna(subset=["Close"]).copy()
         bench_df["B_MA20"] = bench_df["Close"].rolling(20).mean()
         bench_df["B_RET20"] = bench_df["Close"].pct_change(20)
+
+    twii_series = None
+    if "^TWII" in data.columns.get_level_values(0):
+        twii_series = data["^TWII"]["Close"].dropna()
+        if twii_series.empty:
+            twii_series = None
 
     trades = []
     shadow_trades = []  # v3: 同日同股的次要策略訊號也做影子模擬統計 (不占組合資金), 避免次要訊號被優先序吞掉而看不見表現
@@ -95,7 +101,7 @@ def run_portfolio_backtest() -> dict:
             # 與實盤同一函數; 切片只到訊號日, 無未來資料
             sigs = evaluate_candidate(df_raw.iloc[:i + 1], sid, sname, sfx,
                                       chip_info=None, bench_ret_20d=bench_ret20,
-                                      market_ok=m_ok, require_chip=False)
+                                      market_ok=m_ok, require_chip=False, bench_series=twii_series)
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
