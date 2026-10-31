@@ -51,10 +51,12 @@ jobs:
           HOUR_UTC=$(date -u +%H)
           MODE="${{ github.event.inputs.task_mode }}"
 
+          # 手動指定的 MODE 永遠優先；時間判斷只適用於 MODE 為空的排程觸發
+          # （否則週六手動點 morning_brief 會被 DOW==6 搶走去跑回測）。
           if [ "$MODE" = "dline_s3" ]; then
             echo "🧪 執行 D 線情境三 S3 帳本驗證 (labs/dline_s3_lab.py，預註冊 DLINE_S3_PREREG_2026-10-24.md，僅此 lab，不連帶重跑週六全套)..."
             python labs/dline_s3_lab.py
-          elif [ "$MODE" = "backtest" ] || [ "$DOW" -eq 6 ]; then
+          elif [ "$MODE" = "backtest" ]; then
             echo "📈 執行每週六 09:00 自動回測績效健檢 (backtest.py)..."
             python backtest.py
             echo "🧪 執行候選策略原型實驗室 (prototype_lab.py)..."
@@ -65,13 +67,33 @@ jobs:
             python labs/selection_lab.py || true
             echo "🧪 執行 S0/S4 優化實驗室 (s04_opt_lab.py，預註冊 S04_OPT_PREREG_2026-10-24.md)..."
             python labs/s04_opt_lab.py || true
-          elif [ "$MODE" = "screener" ] || [ "$HOUR_UTC" -ge 12 ]; then
+          elif [ "$MODE" = "screener" ]; then
             echo "📌 執行晚間 21:00 選股與極簡通知 (screener.py)..."
             python screener.py
-          elif [ "$MODE" = "morning_brief" ] || ([ "$HOUR_UTC" -eq 0 ] && [ "$DOW" -ge 1 ] && [ "$DOW" -le 5 ]); then
+          elif [ "$MODE" = "morning_brief" ]; then
             echo "🌅 執行 08:00 盤前推播今日觀察＋持倉 (morning_brief.py)..."
             python morning_brief.py
-          elif [ "$MODE" = "close_summary" ] || ([ "$HOUR_UTC" -eq 6 ] && [ "$DOW" -ge 1 ] && [ "$DOW" -le 5 ]); then
+          elif [ "$MODE" = "close_summary" ]; then
+            echo "🌇 執行 14:00 收盤推播今日進出總攬＋持倉 (close_summary.py)..."
+            python close_summary.py
+          elif [ -z "$MODE" ] && [ "$DOW" -eq 6 ]; then
+            echo "📈 執行每週六 09:00 自動回測績效健檢 (backtest.py)..."
+            python backtest.py
+            echo "🧪 執行候選策略原型實驗室 (prototype_lab.py)..."
+            python labs/prototype_lab.py || true
+            echo "🧪 執行 BRK20 組合級驗證 (breakout_lab.py)..."
+            python labs/breakout_lab.py || true
+            echo "🔎 執行進場選擇濾網實驗 (selection_lab.py)..."
+            python labs/selection_lab.py || true
+            echo "🧪 執行 S0/S4 優化實驗室 (s04_opt_lab.py，預註冊 S04_OPT_PREREG_2026-10-24.md)..."
+            python labs/s04_opt_lab.py || true
+          elif [ -z "$MODE" ] && [ "$HOUR_UTC" -ge 12 ]; then
+            echo "📌 執行晚間 21:00 選股與極簡通知 (screener.py)..."
+            python screener.py
+          elif [ -z "$MODE" ] && [ "$HOUR_UTC" -eq 0 ] && [ "$DOW" -ge 1 ] && [ "$DOW" -le 5 ]; then
+            echo "🌅 執行 08:00 盤前推播今日觀察＋持倉 (morning_brief.py)..."
+            python morning_brief.py
+          elif [ -z "$MODE" ] && [ "$HOUR_UTC" -eq 6 ] && [ "$DOW" -ge 1 ] && [ "$DOW" -le 5 ]; then
             echo "🌇 執行 14:00 收盤推播今日進出總攬＋持倉 (close_summary.py)..."
             python close_summary.py
           else
