@@ -1,58 +1,58 @@
 {
-  "generated_at": "2026-10-24 12:34:04",
+  "generated_at": "2026-10-31 02:11:17",
   "prototypes": {
     "P2_PEAD_top30_hold20": {
       "n": 787,
-      "win": 48.4,
-      "avg": 4.09,
+      "win": 48.3,
+      "avg": 4.05,
       "median": -0.58,
-      "avg_win": 16.37,
-      "avg_loss": -7.44,
-      "rr": 2.2
+      "avg_win": 16.4,
+      "avg_loss": -7.48,
+      "rr": 2.19
     },
     "BASE_全部事件_hold20": {
       "n": 7035,
-      "win": 48.7,
-      "avg": 2.98,
-      "median": -0.3,
-      "avg_win": 13.05,
-      "avg_loss": -6.59,
+      "win": 48.6,
+      "avg": 2.96,
+      "median": -0.32,
+      "avg_win": 13.07,
+      "avg_loss": -6.61,
       "rr": 1.98
     },
     "P2_PEAD_top30_hold40": {
       "n": 787,
-      "win": 44.1,
-      "avg": 7.72,
-      "median": -5.41,
-      "avg_win": 27.95,
-      "avg_loss": -8.23,
-      "rr": 3.4
+      "win": 44.0,
+      "avg": 7.59,
+      "median": -8.54,
+      "avg_win": 27.8,
+      "avg_loss": -8.27,
+      "rr": 3.36
     },
     "BASE_全部事件_hold40": {
       "n": 7035,
-      "win": 45.0,
-      "avg": 5.51,
-      "median": -2.36,
-      "avg_win": 21.66,
-      "avg_loss": -7.69,
-      "rr": 2.82
+      "win": 44.6,
+      "avg": 5.42,
+      "median": -2.56,
+      "avg_win": 21.7,
+      "avg_loss": -7.72,
+      "rr": 2.81
     },
     "P2_PEAD_top30_hold60": {
       "n": 787,
-      "win": 39.9,
-      "avg": 9.29,
+      "win": 39.8,
+      "avg": 9.12,
       "median": -8.54,
-      "avg_win": 36.0,
-      "avg_loss": -8.45,
-      "rr": 4.26
+      "avg_win": 35.81,
+      "avg_loss": -8.51,
+      "rr": 4.21
     },
     "BASE_全部事件_hold60": {
       "n": 7035,
-      "win": 41.4,
-      "avg": 6.99,
+      "win": 40.9,
+      "avg": 6.85,
       "median": -8.54,
-      "avg_win": 28.39,
-      "avg_loss": -8.1,
+      "avg_win": 28.46,
+      "avg_loss": -8.13,
       "rr": 3.5
     }
   }
