@@ -11,6 +11,7 @@ from strategy_core import (
     CONFIG, STRATEGY_NAMES, calc_rsi, calc_up_down_vol_ratio, calc_volume_poc_and_max_bar,
     calc_cdp_levels, calc_position_size, calc_exit_plan as calc_pct_trailing_exit_plan,
     prepare_indicators, chip_is_positive, market_regime_ok, evaluate_candidate,
+    migrate_position_record,
 )
 
 POSITIONS_FILE = "active_positions.json"
@@ -148,12 +149,14 @@ def update_active_positions(new_signals: list) -> list:
         except Exception:
             existing = []
 
-    # 只保留真正由盤中觸發買進 (entered_intraday == True) 且仍在 HOLDING 的真實持倉
-    active_map = {
-        item["stock_id"]: item
-        for item in existing
-        if item.get("status") == "HOLDING" and item.get("entered_intraday", False) is True
-    }
+    # 只保留真正由盤中觸發買進 (entered_intraday == True) 且仍在 HOLDING 的真實持倉；
+    # 舊制（張、300 萬）紀錄先轉新制（股、10 萬）再保留
+    active_map = {}
+    for item in existing:
+        if item.get("status") == "HOLDING" and item.get("entered_intraday", False) is True:
+            m = migrate_position_record(item)
+            if m is not None:
+                active_map[m["stock_id"]] = m
 
     for sig in new_signals:
         sid = sig["stock_id"]
@@ -178,18 +181,18 @@ def update_active_positions(new_signals: list) -> list:
             "dynamic_trailing_stop": ep["dynamic_trailing_stop"],
             "tp1_price": ep["tp1_price"],
             "tp1_reduce_pct": ep["tp1_reduce_pct"],
-            "tp1_reduce_lots": ep["tp1_reduce_lots"],
+            "tp1_reduce_shares": ep["tp1_reduce_shares"],
             "tp1_trail_drawdown": ep["tp1_trail_drawdown"],
             "tp2_price": ep["tp2_price"],
             "tp2_reduce_pct": ep["tp2_reduce_pct"],
-            "tp2_reduce_lots": ep["tp2_reduce_lots"],
+            "tp2_reduce_shares": ep["tp2_reduce_shares"],
             "tp2_trail_drawdown": ep["tp2_trail_drawdown"],
             "tp3_price": ep["tp3_price"],
-            "tp3_reduce_lots": ep.get("tp3_reduce_lots", 0),
+            "tp3_reduce_shares": ep.get("tp3_reduce_shares", 0),
             "tp3_reduce_pct": ep.get("tp3_reduce_pct", 0),
-            "tail_lots": ep.get("tail_lots", 0),
+            "tail_shares": ep.get("tail_shares", 0),
             "tp3_remain_pct": ep["tp3_remain_pct"],
-            "tp3_remain_lots": ep["tp3_remain_lots"],
+            "tp3_remain_shares": ep["tp3_remain_shares"],
             "tp3_trail_drawdown": ep["tp3_trail_drawdown"],
             "poc_price": ind["poc_price"],
             "max_vol_low": ind["max_vol_low"],
@@ -197,8 +200,8 @@ def update_active_positions(new_signals: list) -> list:
             "ma5": ind["ma5"],
             "ma10": ind["ma10"],
             "ma20": ind["ma20"],
-            "suggested_lots": sig["suggested_lots"],
-            "remaining_lots": sig["suggested_lots"],
+            "suggested_shares": sig["suggested_shares"],
+            "remaining_shares": sig["suggested_shares"],
             "capital_used": sig["capital_used"],
             "capital_pct": sig["capital_pct"],
             "max_loss_twd": sig["max_loss_twd"],
@@ -234,10 +237,10 @@ def build_simplified_tg_report(payload: dict, trade_date: str) -> str:
                 f"• 盤中進場觸發價：突破 {s['entry_price']} 元 (追價上限 {ep['entry_high']} 元，開低破位不買)\n"
                 f"• 初始停損點：{s['hard_stop']} 元 ({s['stop_pct']}%｜3日不漲破5MA主動汰弱)\n"
                 f"• 分批停利與目標價：\n"
-                f"  - 停利一 (+6.0%)：{ep['tp1_price']} 元 (減碼 {ep['tp1_reduce_pct']}% / 賣 {ep['tp1_reduce_lots']} 張，底線鎖 +1.5%)\n"
-                f"  - 停利二 (+14.0%)：{ep['tp2_price']} 元 (減碼 {ep['tp2_reduce_pct']}% / 賣 {ep['tp2_reduce_lots']} 張，底線鎖 +8.0%)\n"
-                f"  - 目標價 (+25.0%)：{ep['tp3_price']} 元 (尾倉 {ep['tp3_remain_pct']}% / {ep['tp3_remain_lots']} 張以最高收盤回落6%抱到底)\n"
-                f"• 總部位控管：建議買進 {s['suggested_lots']} 張 (動用 {s['capital_used']//10000} 萬 / 佔總資金 {s['capital_pct']}%，最大風險 {s['max_loss_twd']:,} 元)"
+                f"  - 停利一 (+6.0%)：{ep['tp1_price']} 元 (減碼 {ep['tp1_reduce_pct']}% / 賣 {ep['tp1_reduce_shares']} 股，底線鎖 +1.5%)\n"
+                f"  - 停利二 (+14.0%)：{ep['tp2_price']} 元 (減碼 {ep['tp2_reduce_pct']}% / 賣 {ep['tp2_reduce_shares']} 股，底線鎖 +8.0%)\n"
+                f"  - 目標價 (+25.0%)：{ep['tp3_price']} 元 (尾倉 {ep['tp3_remain_pct']}% / {ep['tp3_remain_shares']} 股以最高收盤回落6%抱到底)\n"
+                f"• 總部位控管：建議買進 {s['suggested_shares']} 股 (動用 {s['capital_used']:,} 元 / 佔總資金 {s['capital_pct']}%，最大風險 {s['max_loss_twd']:,} 元)"
             )
     return "\n".join(lines)
 
