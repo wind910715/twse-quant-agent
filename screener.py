@@ -262,7 +262,7 @@ def main():
     bench_ret_20d = 0.0
 
     try:
-        # v3.7: 期間改抓 1 年，C21 需 100 日最高價＋間隔回溯（5 個月在邊界上太緊）；
+        # v3.7: 期間改抓 1 年，S3 需 100 日最高價＋間隔回溯（5 個月在邊界上太緊）；
         # S0/S1/S2 只看尾段視窗，拉長歷史不改變其訊號。
         data = yf.download(tickers, period="1y", group_by="ticker", threads=True, progress=False)
         bench_close, bench_ma20 = None, None
@@ -272,7 +272,7 @@ def main():
                 bench_ret_20d = (float(b_df["Close"].iloc[-1]) - float(b_df["Close"].iloc[-21])) / float(b_df["Close"].iloc[-21])
                 bench_close = float(b_df["Close"].iloc[-1])
                 bench_ma20 = float(b_df["Close"].rolling(20).mean().iloc[-1])
-        # v3.7: 加權收盤序列供 C02 用；抓不到時 C02 自動跳過，不影響 S0/S1/S2/C21。
+        # v3.7: 加權收盤序列供 S4 用；抓不到時 S4 自動跳過，不影響 S0/S1/S2/S3。
         twii_series = None
         if "^TWII" in data.columns.get_level_values(0):
             twii_series = data["^TWII"]["Close"].dropna()

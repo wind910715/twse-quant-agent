@@ -45,11 +45,11 @@ CONFIG = {
 #   現行: S0 VCP收斂 / S1 破底翻 / S2 量增突破。
 #   另定：盤中觸及觸發價即買進（monitor 原有行為，不加尾盤確認）；觸發當下 monitor
 #   立即發 TG 通知（含完整進出場劇本），不批次、不延遲。
-# v3.7 (2026-10-30, 使用者拍板): 併入 XQ 夜班通過者 C21 烏龜買進、C02 領先大盤創新高
-#   （主系統引擎重測過關：C21 RR 2.9554、C02 RR 2.028、combined 優於 baseline；S02 RR 1.7121 未過剃除不併入）。
-#   優先序：S0 > S1 > S2 > C21 > C02（既有優先，與重測口徑一致）；新策略停損皆採 S2 式（重測假設凍結）。
+# v3.7 (2026-10-30, 使用者拍板): 併入 XQ 夜班通過者 S3 起漲股（原 C21 烏龜買進）、S4 強於大盤（原 C02 領先大盤創新高）
+#   （主系統引擎重測過關：S3 RR 2.9554、S4 RR 2.028、combined 優於 baseline；S02 RR 1.7121 未過剃除不併入）。
+#   優先序：S0 > S1 > S2 > S3 > S4（既有優先，與重測口徑一致）；新策略停損皆採 S2 式（重測假設凍結）。
 STRATEGY_NAMES = [
-    "S0_VCP收斂", "S1_破底翻", "S2_量增突破", "C21_烏龜買進", "C02_領先創新高",
+    "S0_VCP收斂", "S1_破底翻", "S2_量增突破", "S3_起漲股", "S4_強於大盤",
 ]
 
 
@@ -235,8 +235,8 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     require_chip=None 時使用 CONFIG["REQUIRE_CHIP_DATA"] (實盤預設 True)。
     回測因無歷史法人資料傳入 False，所有訊號會被標記 chip_unverified=True，
     報表必須揭露，不能假裝測過法人濾網。
-    bench_series 為加權收盤序列 (DatetimeIndex)，僅供 C02 使用；未提供時跳過 C02，
-    不影響 S0/S1/S2/C21（呼叫端傳入完整序列，本函數以日期交集截斷至訊號日，無前視）。
+    bench_series 為加權收盤序列 (DatetimeIndex)，僅供 S4 使用；未提供時跳過 S4，
+    不影響 S0/S1/S2/S3（呼叫端傳入完整序列，本函數以日期交集截斷至訊號日，無前視）。
     """
     if require_chip is None:
         require_chip = CONFIG["REQUIRE_CHIP_DATA"]
@@ -262,7 +262,7 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     if not market_ok:
         return []
 
-    # S2 (v3.4 併入，原 BRK20): 20 日突破+量增。驗證規格獨立於 S 家族的 rs_strong/ud 閘門,
+    # S2 (v3.4 併入，原 BRK20): 20 日突破+量增。驗證規格獨立於 S0/S1 的 rs_strong/ud 閘門,
     # 僅受 market_ok、基本有效性與法人閘門約束 (與 breakout_lab 驗證口徑一致)。
     prev_20_high = df.iloc[-21:-1]["High"].max()
     brk_hit = (float(cur["Close"]) > float(prev_20_high)) and \
@@ -322,8 +322,8 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(cur["Low"] * 0.996, entry * 0.975)), 2)
         matched.append(("S1_破底翻", entry, stop))
 
-    # S2_量增突破 (v3.4 併入，原 BRK20): 優先序在 S0/S1 之後、C21/C02 之前
-    # (同日同股多策略時取優先序第一個，S2 不再是最低，C21/C02 在後)。
+    # S2_量增突破 (v3.4 併入，原 BRK20): 優先序在 S0/S1 之後、S3/S4 之前
+    # (同日同股多策略時取優先序第一個，S2 不再是最低，S3/S4 在後)。
     # 停損 = max(訊號日低點 x0.995, 進場 x0.975); 驗證版以隔日 trigger 計地板, 差異僅出現在
     # 跳空且結構停損較淺的子集 (<=0.3%), 已於 CHANGES_V34.md 揭露。
     if brk_hit:
@@ -331,7 +331,7 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
         matched.append(("S2_量增突破", entry, stop))
 
-    # C21_烏龜買進 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
+    # S3_起漲股 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
     # 今日最高價 = 100 日最高價（含今日）且上一次同條件距今日 > 100 根（無前次則為首現）。
     # 僅受 market_ok、基本有效性（MV20/價格）與法人閘門約束（與 S2 相同；
     # 重測口徑為 XQ 訊號 + 主系統閘門，不另設 XQ 大盤濾網/5 日均量門檻）。
@@ -351,14 +351,14 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
             if c21_hit:
                 entry = round(float(cur["Close"]), 2)
                 stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-                matched.append(("C21_烏龜買進", entry, stop))
+                matched.append(("S3_起漲股", entry, stop))
 
-    # C02_領先創新高 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
+    # S4_強於大盤 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
     # value1 = 個股收盤 / 加權收盤；up = value1 之 20 日布林上限（均值 + 2x 標準差，ddof=0）；
     # 連續 3 日（含今日）value1 >= up；加權 5MA > 20MA。
-    # 僅受 market_ok、基本有效性與法人閘門約束。需 bench_series，未提供時跳過 C02。
-    # 停損 = S2 式（重測假設，凍結為實盤停損）。C02 區塊包 try/except：
-    # 加權資料異常時只跳過 C02，絕不可拖垮 S0/S1/S2 或整批選股。
+    # 僅受 market_ok、基本有效性與法人閘門約束。需 bench_series，未提供時跳過 S4。
+    # 停損 = S2 式（重測假設，凍結為實盤停損）。S4 區塊包 try/except：
+    # 加權資料異常時只跳過 S4，絕不可拖垮 S0/S1/S2/S3 或整批選股。
     if bench_series is not None and len(df) >= 22:
         try:
             common_idx = df.index.intersection(bench_series.index)
@@ -373,7 +373,7 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
                         if len(tw) >= 20 and float(tw.iloc[-5:].mean()) > float(tw.iloc[-20:].mean()):
                             entry = round(float(cur["Close"]), 2)
                             stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-                            matched.append(("C02_領先創新高", entry, stop))
+                            matched.append(("S4_強於大盤", entry, stop))
         except Exception:
             pass
 
