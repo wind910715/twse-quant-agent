@@ -41,25 +41,26 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONPATH: .
         run: |
           DOW=$(date -u +%u)
           HOUR_UTC=$(date -u +%H)
           MODE="${{ github.event.inputs.task_mode }}"
 
           if [ "$MODE" = "dline_s3" ]; then
-            echo "🧪 執行 D 線情境三 S3 帳本驗證 (dline_s3_lab.py，預註冊 DLINE_S3_PREREG_2026-10-24.md，僅此 lab，不連帶重跑週六全套)..."
-            python dline_s3_lab.py
+            echo "🧪 執行 D 線情境三 S3 帳本驗證 (labs/dline_s3_lab.py，預註冊 DLINE_S3_PREREG_2026-10-24.md，僅此 lab，不連帶重跑週六全套)..."
+            python labs/dline_s3_lab.py
           elif [ "$MODE" = "backtest" ] || [ "$DOW" -eq 6 ]; then
             echo "📈 執行每週六 09:00 自動回測績效健檢 (backtest.py)..."
             python backtest.py
             echo "🧪 執行候選策略原型實驗室 (prototype_lab.py)..."
-            python prototype_lab.py || true
+            python labs/prototype_lab.py || true
             echo "🧪 執行 BRK20 組合級驗證 (breakout_lab.py)..."
-            python breakout_lab.py || true
+            python labs/breakout_lab.py || true
             echo "🔎 執行進場選擇濾網實驗 (selection_lab.py)..."
-            python selection_lab.py || true
+            python labs/selection_lab.py || true
             echo "🧪 執行 S0/S4 優化實驗室 (s04_opt_lab.py，預註冊 S04_OPT_PREREG_2026-10-24.md)..."
-            python s04_opt_lab.py || true
+            python labs/s04_opt_lab.py || true
           elif [ "$MODE" = "screener" ] || [ "$HOUR_UTC" -ge 12 ]; then
             echo "📌 執行晚間 21:00 選股與極簡通知 (screener.py)..."
             python screener.py
@@ -73,23 +74,38 @@ jobs:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONPATH: .
         run: |
           D=$(TZ=Asia/Taipei date +%d); W=$(TZ=Asia/Taipei date +%u)
           if [ "$D" = "11" ] || { [ "$W" = "1" ] && [ "$D" -ge 12 ] && [ "$D" -le 13 ]; }; then
             echo "📋 產生雙因子月輪動名單 (factor_rotation.py)..."
-            python factor_rotation.py || true
+            python labs/factor_rotation.py || true
           else
             echo "非名單產生日 (day=$D), 跳過"
           fi
+
+      - name: 3c. 上傳實驗室結果為 artifact（不再 commit 進 main）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-results
+          path: |
+            prototype_results.json
+            breakout_lab_results.json
+            factor_rotation.json
+            selection_lab_results.json
+            s04_opt_results.json
+            dline_s3_results.json
+          if-no-files-found: warn
 
       - name: 4. 同步寫回最新選股、持倉、季度成分股與週六回測數據
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
-          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json dline_s3_results.json
-          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json prototype_results.json breakout_lab_results.json factor_rotation.json selection_lab_results.json s04_opt_results.json dline_s3_results.json || true
+          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json
+          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
-            git pull --rebase origin main || true
-            git push origin HEAD || true
+            git pull --rebase origin main
+            git push origin HEAD
           fi
