@@ -5,7 +5,36 @@ import datetime
 import requests
 import yfinance as yf
 
+from strategy_core import migrate_position_record, taipei_today, taipei_now_str
+
 POSITIONS_FILE = "active_positions.json"
+TRADE_EVENTS_FILE = "trade_events.jsonl"
+
+
+def append_trade_event(event: dict):
+    """進出場事件記帳（供 14:00 收盤總攬讀取）。記帳失敗不得中斷監控；檔案僅保留近 30 天。"""
+    try:
+        today = taipei_today()
+        cutoff = (datetime.date.fromisoformat(today) - datetime.timedelta(days=30)).isoformat()
+        lines = []
+        if os.path.exists(TRADE_EVENTS_FILE):
+            with open(TRADE_EVENTS_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        old = json.loads(line)
+                    except Exception:
+                        continue
+                    d = str(old.get("date", ""))
+                    if d and d >= cutoff:
+                        lines.append(line)
+        lines.append(json.dumps(event, ensure_ascii=False))
+        with open(TRADE_EVENTS_FILE, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception:
+        pass
 
 def fetch_twse_mis_batch_quotes(positions: list) -> dict:
     """
@@ -110,7 +139,18 @@ def check_positions_once() -> bool:
         return False
 
     modified = False
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 舊制（張、300 萬）紀錄一次性轉新制（股、10 萬）；轉換到的與被剔除的都要寫回
+    migrated = []
+    for p in positions:
+        m = migrate_position_record(p)
+        if m is None:
+            modified = True
+            continue
+        if m is not p:
+            modified = True
+        migrated.append(m)
+    positions = migrated
+    now_str = taipei_now_str()
     batch_quotes = fetch_twse_mis_batch_quotes(positions)
 
     for pos in positions:
@@ -169,13 +209,21 @@ def check_positions_once() -> bool:
                     f"• 觸發標的：{sid} {sname} (時間：{now_str[-8:]})",
                     f"• 觸發策略：{pos.get('strategy', '')}",
                     f"• 建議進場價：現價 {live} 元 (已突破轉強觸發價 {trigger_buy} 元，追價上限 {e_high} 元)",
-                    f"• 總部位建議：買進 {pos['suggested_lots']} 張 (動用約 {pos.get('capital_used', 0)//10000} 萬 / 佔總資金 {pos.get('capital_pct', 20)}%)",
+                    f"• 總部位建議：買進 {pos['suggested_shares']} 股 (動用 {pos.get('capital_used', 0):,} 元 / 佔總資金 {pos.get('capital_pct', 20)}%)",
                     f"• 初始硬性停損：{pos['hard_stop']} 元 ({pos.get('stop_pct', -2.5)}%｜3日不漲破5MA主動汰弱)",
+                    f"• 注意：零股今日進場，明日才能出場（當日不可沖銷），停損／停利皆自明日開始執行",
                     f"• 🎯【對應策略分批停利與移動出場計畫】：",
-                    f"  ① 停利一 (+6.0%)：{pos['tp1_price']} 元 ➔ 減碼 {pos['tp1_reduce_pct']}% (賣 {pos['tp1_reduce_lots']} 張)，底線鎖 +1.5%",
-                    f"  ② 停利二 (+14.0%)：{pos['tp2_price']} 元 ➔ 再減碼 {pos['tp2_reduce_pct']}% (賣 {pos['tp2_reduce_lots']} 張)，底線鎖 +8.0%",
-                    f"  ③ 目標價 (+25.0%)：{pos['tp3_price']} 元 ➔ 尾倉 {pos['tp3_remain_pct']}% ({pos['tp3_remain_lots']} 張) 以最高收盤回落 5.5%~6% 抱到底！"
+                    f"  ① 停利一 (+6.0%)：{pos['tp1_price']} 元 ➔ 減碼 {pos['tp1_reduce_pct']}% (賣 {pos['tp1_reduce_shares']} 股)，底線鎖 +1.5%",
+                    f"  ② 停利二 (+14.0%)：{pos['tp2_price']} 元 ➔ 再減碼 {pos['tp2_reduce_pct']}% (賣 {pos['tp2_reduce_shares']} 股)，底線鎖 +8.0%",
+                    f"  ③ 目標價 (+25.0%)：{pos['tp3_price']} 元 ➔ 尾倉 {pos['tp3_remain_pct']}% ({pos['tp3_remain_shares']} 股) 以最高收盤回落 5.5%~6% 抱到底！"
                 ])
+                append_trade_event({
+                    "date": now_str[:10], "time": now_str[-8:],
+                    "stock_id": sid, "stock_name": sname, "strategy": pos.get("strategy", ""),
+                    "event": "ENTRY", "price": live, "shares": pos["suggested_shares"],
+                    "remaining_shares": pos["suggested_shares"],
+                    "entry_price": live, "gain_pct": None,
+                })
                 continue
 
         # ==========================================================
@@ -185,11 +233,23 @@ def check_positions_once() -> bool:
             continue
 
         entry_p = pos.get("actual_entry_price", pos["entry_price"])
-        rem_lots = pos.get("remaining_lots", pos.get("suggested_lots", 1))
+        rem_shares = pos.get("remaining_shares", pos.get("suggested_shares", 1))
         highest_p = max(pos.get("highest_price", entry_p), live, day_high)
         if highest_p > pos.get("highest_price", 0):
             pos["highest_price"] = highest_p
             modified = True
+
+        # 已透過停利全數賣出者直接結案，不再發 0 股通知
+        if rem_shares <= 0:
+            pos["status"] = "EXITED"
+            modified = True
+            continue
+
+        # 零股 T+1：進場當日不可出場（停損／停利／吊燈／汰弱皆自次一交易日起算）；
+        # 無 entry_time 的舊紀錄視為已可出場（進場日必在改制前）。
+        entry_date = (pos.get("entry_time") or "")[:10]
+        if entry_date and entry_date == taipei_today():
+            continue
 
         # 註: 盤中移動停利以即時價對 dynamic_trailing_stop 判斷; backtest 以收盤價近似,
         # 兩者觸發時點會有差異, 解讀回測 TP/trail 表現時需保留此誤差。
@@ -199,7 +259,7 @@ def check_positions_once() -> bool:
         if live <= trail_stop:
             is_profit_exit = pos.get("tp1_alerted", False) or pos.get("be_locked", False)
             pos["status"] = "TRAILING_PROFIT_EXIT" if is_profit_exit else "STOPPED_OUT"
-            pos["remaining_lots"] = 0
+            pos["remaining_shares"] = 0
             modified = True
             title_str = "💰 觸發吊燈移動停利｜獲利出清" if is_profit_exit else "⛔ 觸發初始硬性停損｜立即清倉"
             gain_pct = round(((live - entry_p) / entry_p) * 100, 2)
@@ -207,55 +267,87 @@ def check_positions_once() -> bool:
                 f"• 標的：{sid} {sname}｜對應策略：{pos.get('strategy', '')}",
                 f"• 證交所現價：{live} 元 (進場價 {entry_p} 元，報酬 {gain_pct:+.2f}%)",
                 f"• 波段最高價：{highest_p} 元｜觸發防守線：{trail_stop} 元",
-                f"• 行動指令：請立即將剩餘 {rem_lots} 張全數出清！"
+                f"• 行動指令：請立即將剩餘 {rem_shares} 股全數出清！"
             ])
+            append_trade_event({
+                "date": now_str[:10], "time": now_str[-8:],
+                "stock_id": sid, "stock_name": sname, "strategy": pos.get("strategy", ""),
+                "event": "TRAILING_PROFIT_EXIT" if is_profit_exit else "STOPPED_OUT",
+                "price": live, "shares": rem_shares, "remaining_shares": 0,
+                "entry_price": entry_p, "gain_pct": gain_pct,
+            })
             continue
 
         # 2. 停利一 (TP1: +6.0%) 減碼 25%，底線鎖 +1.5%，啟動最高價回落 5.5% 吊燈停利
         if live >= pos.get("tp1_price", 999999) and not pos.get("tp1_alerted", False):
             pos["tp1_alerted"] = True
             pos["be_locked"] = True
-            sell_lots = min(rem_lots, pos.get("tp1_reduce_lots", 1))
+            sell_shares = min(rem_shares, pos.get("tp1_reduce_shares", 1))
             sell_pct = pos.get("tp1_reduce_pct", 25)
-            pos["remaining_lots"] = max(0, rem_lots - sell_lots)
+            pos["remaining_shares"] = max(0, rem_shares - sell_shares)
             pos["dynamic_trailing_stop"] = round(max(entry_p * 1.015, highest_p * 0.945), 2)
             modified = True
-            send_telegram_alert(f"🎯 停利一(+6.0%)達標｜減碼 {sell_pct}% ({sell_lots}張)", [
+            send_telegram_alert(f"🎯 停利一(+6.0%)達標｜減碼 {sell_pct}% ({sell_shares}股)", [
                 f"• 標的：{sid} {sname} ({pos.get('strategy', '')})｜現價：{live} 元",
-                f"• 行動指令：請先獲利賣出 {sell_lots} 張！剩餘 {pos['remaining_lots']} 張防守底線已上移至 {pos['dynamic_trailing_stop']} 元，下一目標看 TP2 ({pos['tp2_price']} 元)"
+                f"• 行動指令：請先獲利賣出 {sell_shares} 股！剩餘 {pos['remaining_shares']} 股防守底線已上移至 {pos['dynamic_trailing_stop']} 元，下一目標看 TP2 ({pos['tp2_price']} 元)"
             ])
+            append_trade_event({
+                "date": now_str[:10], "time": now_str[-8:],
+                "stock_id": sid, "stock_name": sname, "strategy": pos.get("strategy", ""),
+                "event": "TP1", "price": live, "shares": sell_shares,
+                "remaining_shares": pos["remaining_shares"],
+                "entry_price": entry_p, "gain_pct": round(((live - entry_p) / entry_p) * 100, 2),
+            })
             continue
 
         # 3. 停利二 (TP2: +14.0%) 再減碼 35%，底線鎖死 +8.0%
         if live >= pos.get("tp2_price", 999999) and not pos.get("tp2_alerted", False):
             pos["tp2_alerted"] = True
-            sell_lots = min(rem_lots, pos.get("tp2_reduce_lots", 1))
+            sell_shares = min(rem_shares, pos.get("tp2_reduce_shares", 1))
             sell_pct = pos.get("tp2_reduce_pct", 35)
-            pos["remaining_lots"] = max(0, rem_lots - sell_lots)
+            if sell_shares <= 0:
+                # 極小部位（1 股）TP2 已無股可賣，靜默標記已達標，不發 0 股通知
+                modified = True
+                continue
+            pos["remaining_shares"] = max(0, rem_shares - sell_shares)
             pos["dynamic_trailing_stop"] = round(max(entry_p * 1.080, highest_p * 0.945), 2)
             modified = True
-            send_telegram_alert(f"🚀 停利二(+14.0%)達標｜再減碼 {sell_pct}% ({sell_lots}張)", [
+            send_telegram_alert(f"🚀 停利二(+14.0%)達標｜再減碼 {sell_pct}% ({sell_shares}股)", [
                 f"• 標的：{sid} {sname} ({pos.get('strategy', '')})｜現價：{live} 元",
-                f"• 行動指令：請再獲利賣出 {sell_lots} 張！剩餘 {pos['remaining_lots']} 張防守底線已上移至 {pos['dynamic_trailing_stop']} 元 (+8.0%保底)"
+                f"• 行動指令：請再獲利賣出 {sell_shares} 股！剩餘 {pos['remaining_shares']} 股防守底線已上移至 {pos['dynamic_trailing_stop']} 元 (+8.0%保底)"
             ])
+            append_trade_event({
+                "date": now_str[:10], "time": now_str[-8:],
+                "stock_id": sid, "stock_name": sname, "strategy": pos.get("strategy", ""),
+                "event": "TP2", "price": live, "shares": sell_shares,
+                "remaining_shares": pos["remaining_shares"],
+                "entry_price": entry_p, "gain_pct": round(((live - entry_p) / entry_p) * 100, 2),
+            })
             continue
 
         # 4. 波段目標價 (TP3: +25.0%)
-        # v2: 賣出張數以 screener 出場計畫的 tp3_reduce_lots 為準 (SSOT),
-        # 不再用「剩餘 50%」推測 (小張數時會與計畫不符)。舊持倉無此欄位才退回舊算法。
+        # v2: 賣出股數以 screener 出場計畫的 tp3_reduce_shares 為準 (SSOT),
+        # 不再用「剩餘 50%」推測。舊持倉無此欄位才退回舊算法。
         if live >= pos.get("tp3_price", 999999) and not pos.get("tp3_alerted", False):
             pos["tp3_alerted"] = True
-            if pos.get("tp3_reduce_lots"):
-                sell_lots = min(rem_lots, int(pos["tp3_reduce_lots"]))
+            if pos.get("tp3_reduce_shares"):
+                sell_shares = min(rem_shares, int(pos["tp3_reduce_shares"]))
             else:
-                sell_lots = max(1, int(round(rem_lots * 0.50)))
-            pos["remaining_lots"] = max(0, rem_lots - sell_lots)
+                sell_shares = max(1, int(round(rem_shares * 0.50)))
+            pos["remaining_shares"] = max(0, rem_shares - sell_shares)
             pos["dynamic_trailing_stop"] = round(max(entry_p * 1.160, highest_p * 0.940), 2)
             modified = True
-            send_telegram_alert(f"👑 波段目標(+25.0%)達標｜減碼尾倉 ({sell_lots}張)", [
+            send_telegram_alert(f"👑 波段目標(+25.0%)達標｜減碼尾倉 ({sell_shares}股)", [
                 f"• 標的：{sid} {sname} ({pos.get('strategy', '')})｜現價：{live} 元",
-                f"• 行動指令：賣出 {sell_lots} 張，最後尾倉 {pos['remaining_lots']} 張緊守 {pos['dynamic_trailing_stop']} 元抱到底！"
+                f"• 行動指令：賣出 {sell_shares} 股，最後尾倉 {pos['remaining_shares']} 股緊守 {pos['dynamic_trailing_stop']} 元抱到底！"
             ])
+            append_trade_event({
+                "date": now_str[:10], "time": now_str[-8:],
+                "stock_id": sid, "stock_name": sname, "strategy": pos.get("strategy", ""),
+                "event": "TP3", "price": live, "shares": sell_shares,
+                "remaining_shares": pos["remaining_shares"],
+                "entry_price": entry_p, "gain_pct": round(((live - entry_p) / entry_p) * 100, 2),
+            })
 
     if modified:
         with open(POSITIONS_FILE, "w", encoding="utf-8") as f:

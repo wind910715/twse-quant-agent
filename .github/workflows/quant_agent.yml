@@ -8,10 +8,14 @@ on:
     - cron: '*/5 1-5 * * 1-5'
     # 3. 每週六 早上 09:00 (UTC 01:00)：自動執行歷史回測確認勝率與 MDD
     - cron: '0 1 * * 6'
+    # 4. 週一至週五 早上 08:00 (UTC 00:00)：盤前推播今日觀察標的＋目前持倉 (morning_brief.py)
+    - cron: '0 0 * * 1-5'
+    # 5. 週一至週五 下午 14:00 (UTC 06:00)：收盤推播今日進出總攬＋目前持倉 (close_summary.py)
+    - cron: '0 6 * * 1-5'
   workflow_dispatch:
     inputs:
       task_mode:
-        description: '手動測試模式 (screener / monitor / backtest)'
+        description: '手動測試模式 (screener / monitor / backtest / morning_brief / close_summary)'
         required: false
         default: 'backtest'
 
@@ -64,6 +68,12 @@ jobs:
           elif [ "$MODE" = "screener" ] || [ "$HOUR_UTC" -ge 12 ]; then
             echo "📌 執行晚間 21:00 選股與極簡通知 (screener.py)..."
             python screener.py
+          elif [ "$MODE" = "morning_brief" ] || ([ "$HOUR_UTC" -eq 0 ] && [ "$DOW" -ge 1 ] && [ "$DOW" -le 5 ]); then
+            echo "🌅 執行 08:00 盤前推播今日觀察＋持倉 (morning_brief.py)..."
+            python morning_brief.py
+          elif [ "$MODE" = "close_summary" ] || ([ "$HOUR_UTC" -eq 6 ] && [ "$DOW" -ge 1 ] && [ "$DOW" -le 5 ]); then
+            echo "🌇 執行 14:00 收盤推播今日進出總攬＋持倉 (close_summary.py)..."
+            python close_summary.py
           else
             echo "🛡️ 執行盤中進場點與停利停損隨侍監控 (monitor.py)..."
             python monitor.py
@@ -102,8 +112,8 @@ jobs:
         run: |
           git config --local user.email "quant-bot@github.com"
           git config --local user.name "Quant Task Agent"
-          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json
-          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json
+          touch latest_report.json active_positions.json latest_backtest.json universe_cache.json trade_events.jsonl
+          git add latest_report.json active_positions.json latest_backtest.json universe_cache.json trade_events.jsonl
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
             git pull --rebase origin main

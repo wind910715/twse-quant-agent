@@ -6,17 +6,23 @@ strategy_core.py — S0~S5 策略的單一真相來源 (SSOT) v2
    不允許兩邊各寫一份策略邏輯。差異只能來自「輸入資料不同」，且必須被明確標示
    (例如回測無歷史法人資料 -> require_chip=False 且每筆交易標記 chip_unverified)。
 2. 停損不做假: 不再把結構停損夾進 -1.8%~-2.6%。停損距離是多少就用多少算部位；
-   若 1 張就超過資金上限或風險預算，回傳 lots=0 並附 reason，不再強制買 1 張。
+   若 1 股就超過資金上限或風險預算，回傳 shares=0 並附 reason，不再強制買進。
 3. 法人濾網不再「無資料自動通過」: has_data=False 時 require_chip=True 直接不給訊號。
 4. 大盤濾網進實盤: screener 與 backtest 共用 market_regime_ok()。
-5. 出場計畫欄位明確化: TP3 有獨立的 tp3_reduce_lots / tp3_reduce_pct 與 tail_lots，
+5. 出場計畫欄位明確化: TP3 有獨立的 tp3_reduce_shares / tp3_reduce_pct 與 tail_shares，
    monitor.py 不再用「賣剩餘 50%」這種推測寫法。
+6. 2026-10-31 使用者定：權益改 10 萬、進出場改零股（單位：股）。舊制（張、300 萬）
+   的持倉／觀察紀錄由 migrate_position_record() 一次性轉換：HOLDING 張數 ×1000 轉股數，
+   WATCHING 以新制重算（舊張數是 300 萬 sizing，不可直接 ×1000）。
 """
+import datetime
+
 import numpy as np
 import pandas as pd
 
 CONFIG = {
-    "ACCOUNT_EQUITY": 3_000_000,
+    # 2026-10-31 使用者定：假設權益改 10 萬（原 300 萬），進出場改零股
+    "ACCOUNT_EQUITY": 100_000,
     "RISK_PER_TRADE": 0.012,        # 單筆最大容許虧損 1.2%
     "MAX_POS_RATIO": 0.35,          # 單筆最大持倉上限 35%
     "MAX_CONCURRENT_POSITIONS": 5,  # 組合同時持倉上限 (回測與實盤共用)
@@ -150,11 +156,10 @@ def calc_position_size(entry: float, stop: float) -> dict:
     """
     v2 修正:
     - 不再把停損夾進固定區間: adjusted_stop 永遠等於結構停損 stop。
-    - 不再強制至少 1 張: 若 1 張就超過資金上限 (35%) 或風險預算 (1.2%)，
-      回傳 lots=0 + reason="one_lot_exceeds_limits"，呼叫端應跳過該訊號
-      (高價股改用零股是另一個產品決策，不在程式裡偷偷硬買整張)。
+    - 零股制 (2026-10-31 起): 股數直接以股為單位取整；若 1 股就超過資金上限 (35%)
+      或風險預算 (1.2%)，回傳 shares=0 + reason="min_share_exceeds_limits"，呼叫端應跳過該訊號。
     """
-    base = {"lots": 0, "stop_pct": 0.0, "max_loss_twd": 0, "capital_used": 0,
+    base = {"shares": 0, "stop_pct": 0.0, "max_loss_twd": 0, "capital_used": 0,
             "capital_pct": 0.0, "adjusted_stop": stop, "reason": ""}
     if entry <= 0 or stop <= 0 or entry <= stop:
         base["reason"] = "invalid_stop"
@@ -163,64 +168,142 @@ def calc_position_size(entry: float, stop: float) -> dict:
     max_risk_twd = CONFIG["ACCOUNT_EQUITY"] * CONFIG["RISK_PER_TRADE"]
     raw_shares = max_risk_twd / risk_per_share
     max_cap_shares = (CONFIG["ACCOUNT_EQUITY"] * CONFIG["MAX_POS_RATIO"]) / entry
-    lots = int(min(raw_shares, max_cap_shares) // 1000)
-    if lots < 1:
-        one_lot_capital_pct = round(1000 * entry / CONFIG["ACCOUNT_EQUITY"] * 100, 1)
-        one_lot_loss = int(1000 * risk_per_share)
+    shares = int(min(raw_shares, max_cap_shares))
+    if shares < 1:
+        one_share_capital_pct = round(1 * entry / CONFIG["ACCOUNT_EQUITY"] * 100, 1)
+        one_share_loss = int(1 * risk_per_share)
         base.update({
-            "reason": "one_lot_exceeds_limits",
-            "one_lot_capital_pct": one_lot_capital_pct,
-            "one_lot_max_loss_twd": one_lot_loss,
+            "reason": "min_share_exceeds_limits",
+            "one_share_capital_pct": one_share_capital_pct,
+            "one_share_max_loss_twd": one_share_loss,
             "stop_pct": round(((stop - entry) / entry) * 100, 2),
         })
         return base
     base.update({
-        "lots": lots,
+        "shares": shares,
         "adjusted_stop": stop,
         "stop_pct": round(((stop - entry) / entry) * 100, 2),
-        "max_loss_twd": int(lots * 1000 * risk_per_share),
-        "capital_used": int(lots * 1000 * entry),
-        "capital_pct": round((lots * 1000 * entry / CONFIG["ACCOUNT_EQUITY"]) * 100, 1),
+        "max_loss_twd": int(shares * risk_per_share),
+        "capital_used": int(shares * entry),
+        "capital_pct": round((shares * entry / CONFIG["ACCOUNT_EQUITY"]) * 100, 1),
         "reason": "ok",
     })
     return base
 
 
-def calc_exit_plan(entry: float, hard_stop: float, total_lots: int) -> dict:
-    """三階停利計畫 (SSOT)。TP3 減碼張數獨立欄位，不再與尾倉混在一起。"""
+def calc_exit_plan(entry: float, hard_stop: float, total_shares: int) -> dict:
+    """三階停利計畫 (SSOT)。TP3 減碼股數獨立欄位，不再與尾倉混在一起。"""
     tp1_price = round(entry * (1 + CONFIG["TP1_TARGET_PCT"]), 2)
     tp2_price = round(entry * (1 + CONFIG["TP2_TARGET_PCT"]), 2)
     tp3_price = round(entry * (1 + CONFIG["TP3_TARGET_PCT"]), 2)
-    if total_lots >= 4:
-        tp1_lots = max(1, int(round(total_lots * CONFIG["TP1_REDUCE_RATIO"])))
-        tp2_lots = max(1, int(round(total_lots * CONFIG["TP2_REDUCE_RATIO"])))
-        tp3_lots = max(1, int(round(total_lots * CONFIG["TP3_REDUCE_RATIO"])))
-        tail_lots = max(0, total_lots - tp1_lots - tp2_lots - tp3_lots)
-    elif total_lots == 3:
-        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 1, 1, 0
-    elif total_lots == 2:
-        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 1, 0, 0
+    if total_shares >= 4:
+        tp1_shares = max(1, int(round(total_shares * CONFIG["TP1_REDUCE_RATIO"])))
+        tp2_shares = max(1, int(round(total_shares * CONFIG["TP2_REDUCE_RATIO"])))
+        tp3_shares = max(1, int(round(total_shares * CONFIG["TP3_REDUCE_RATIO"])))
+        tail_shares = max(0, total_shares - tp1_shares - tp2_shares - tp3_shares)
+    elif total_shares == 3:
+        tp1_shares, tp2_shares, tp3_shares, tail_shares = 1, 1, 1, 0
+    elif total_shares == 2:
+        tp1_shares, tp2_shares, tp3_shares, tail_shares = 1, 1, 0, 0
     else:
-        tp1_lots, tp2_lots, tp3_lots, tail_lots = 1, 0, 0, 0
+        tp1_shares, tp2_shares, tp3_shares, tail_shares = 1, 0, 0, 0
 
     def pct(n):
-        return int(round(n / max(total_lots, 1) * 100))
+        return int(round(n / max(total_shares, 1) * 100))
 
     return {
         "entry_low": round(entry, 2),
         "entry_high": round(entry * 1.028, 2),
         "be_trigger_price": tp1_price,
         "be_lock_price": round(entry * (1 + CONFIG["TP1_LOCK_PCT"]), 2),
-        "tp1_price": tp1_price, "tp1_reduce_pct": pct(tp1_lots), "tp1_reduce_lots": tp1_lots,
+        "tp1_price": tp1_price, "tp1_reduce_pct": pct(tp1_shares), "tp1_reduce_shares": tp1_shares,
         "tp1_trail_drawdown": CONFIG["TP1_TRAIL_DD"],
-        "tp2_price": tp2_price, "tp2_reduce_pct": pct(tp2_lots), "tp2_reduce_lots": tp2_lots,
+        "tp2_price": tp2_price, "tp2_reduce_pct": pct(tp2_shares), "tp2_reduce_shares": tp2_shares,
         "tp2_trail_drawdown": CONFIG["TP2_TRAIL_DD"],
-        "tp3_price": tp3_price, "tp3_reduce_pct": pct(tp3_lots), "tp3_reduce_lots": tp3_lots,
-        "tp3_remain_pct": pct(tp3_lots + tail_lots), "tp3_remain_lots": tp3_lots + tail_lots,
-        "tail_lots": tail_lots, "tail_pct": pct(tail_lots),
+        "tp3_price": tp3_price, "tp3_reduce_pct": pct(tp3_shares), "tp3_reduce_shares": tp3_shares,
+        "tp3_remain_pct": pct(tp3_shares + tail_shares), "tp3_remain_shares": tp3_shares + tail_shares,
+        "tail_shares": tail_shares, "tail_pct": pct(tail_shares),
         "tp3_trail_drawdown": CONFIG["TP3_TRAIL_DD"],
         "dynamic_trailing_stop": hard_stop,
     }
+
+
+# ---------------------------------------------------------------- 台北時間與舊制遷移
+def _taipei_tz():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("Asia/Taipei")
+    except Exception:
+        return datetime.timezone(datetime.timedelta(hours=8))
+
+
+def taipei_today() -> str:
+    """台北今日日期 (YYYY-MM-DD)。Actions runner 為 UTC，必須顯式轉台北時間。"""
+    return datetime.datetime.now(_taipei_tz()).strftime("%Y-%m-%d")
+
+
+def taipei_now_str() -> str:
+    """台北現在時間 (YYYY-MM-DD HH:MM:SS)，供進場時間與訊息顯示用。"""
+    return datetime.datetime.now(_taipei_tz()).strftime("%Y-%m-%d %H:%M:%S")
+
+
+_LOTS_TO_SHARES_KEYS = [
+    ("suggested_lots", "suggested_shares"),
+    ("remaining_lots", "remaining_shares"),
+    ("tp1_reduce_lots", "tp1_reduce_shares"),
+    ("tp2_reduce_lots", "tp2_reduce_shares"),
+    ("tp3_reduce_lots", "tp3_reduce_shares"),
+    ("tp3_remain_lots", "tp3_remain_shares"),
+    ("tail_lots", "tail_shares"),
+]
+
+
+def migrate_position_record(pos: dict) -> dict | None:
+    """舊制（張、300 萬 sizing）紀錄轉新制（股、10 萬）。
+
+    已是新制（含 suggested_shares）則原樣回傳。
+    HOLDING 與已出場紀錄：張數 ×1000 轉股數（實際部位不變，繼續追蹤）。
+    WATCHING：舊張數是 300 萬 sizing，不可直接 ×1000，改以新制重算 sizing＋出場計畫；
+    重算為 0 股者回傳 None（新制下不可交易，直接剔除）。
+    """
+    if "suggested_shares" in pos:
+        return pos
+    status = pos.get("status", "")
+    if status == "WATCHING":
+        sizing = calc_position_size(pos["entry_price"], pos["hard_stop"])
+        if sizing["shares"] < 1:
+            return None
+        ep = calc_exit_plan(pos["entry_price"], pos["hard_stop"], sizing["shares"])
+        new = dict(pos)
+        new.update({
+            "suggested_shares": sizing["shares"],
+            "remaining_shares": sizing["shares"],
+            "capital_used": sizing["capital_used"],
+            "capital_pct": sizing["capital_pct"],
+            "max_loss_twd": sizing["max_loss_twd"],
+            "stop_pct": sizing["stop_pct"],
+            "tp1_price": ep["tp1_price"], "tp1_reduce_pct": ep["tp1_reduce_pct"],
+            "tp1_reduce_shares": ep["tp1_reduce_shares"],
+            "tp2_price": ep["tp2_price"], "tp2_reduce_pct": ep["tp2_reduce_pct"],
+            "tp2_reduce_shares": ep["tp2_reduce_shares"],
+            "tp3_price": ep["tp3_price"], "tp3_reduce_shares": ep["tp3_reduce_shares"],
+            "tp3_reduce_pct": ep["tp3_reduce_pct"],
+            "tp3_remain_pct": ep["tp3_remain_pct"],
+            "tp3_remain_shares": ep["tp3_remain_shares"],
+            "tail_shares": ep["tail_shares"],
+            "entry_high": ep["entry_high"],
+            "be_trigger_price": ep["be_trigger_price"],
+            "be_lock_price": ep["be_lock_price"],
+            "dynamic_trailing_stop": pos.get("dynamic_trailing_stop", pos["hard_stop"]),
+        })
+        for old_k, _ in _LOTS_TO_SHARES_KEYS:
+            new.pop(old_k, None)
+        return new
+    new = dict(pos)
+    for old_k, new_k in _LOTS_TO_SHARES_KEYS:
+        if old_k in new:
+            new[new_k] = int(new.pop(old_k)) * 1000
+    return new
 
 
 # ---------------------------------------------------------------- strategy evaluation (SSOT)
@@ -382,14 +465,14 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     ex_prefix = "otc" if sfx == ".TWO" else "tse"
     for strat, entry, raw_stop in matched:
         pos = calc_position_size(entry, raw_stop)
-        if pos["lots"] <= 0:
-            continue  # v2: 部位不合格 (含高價股 1 張超限) 直接跳過, 不硬買
-        exit_plan = calc_exit_plan(entry, pos["adjusted_stop"], pos["lots"])
+        if pos["shares"] <= 0:
+            continue  # v2: 部位不合格直接跳過, 不硬買
+        exit_plan = calc_exit_plan(entry, pos["adjusted_stop"], pos["shares"])
         results.append({
             "date": trade_d, "stock_id": sid, "stock_name": sname, "ex_prefix": ex_prefix,
             "strategy": strat, "close": round(float(cur["Close"]), 2),
             "entry_price": entry, "hard_stop": pos["adjusted_stop"], "stop_pct": pos["stop_pct"],
-            "suggested_lots": pos["lots"], "capital_used": pos["capital_used"],
+            "suggested_shares": pos["shares"], "capital_used": pos["capital_used"],
             "capital_pct": pos["capital_pct"], "max_loss_twd": pos["max_loss_twd"],
             "chip_unverified": chip_unverified,
             "indicators_backend": ind_pack, "exit_plan": exit_plan,

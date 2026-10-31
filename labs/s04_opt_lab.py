@@ -122,7 +122,7 @@ def signals_for_day(a, i, bench_ret20, m_ok, p):
     out = []
     for strat, entry, stop in matched:
         pos = calc_position_size(entry, stop)
-        if pos["lots"] <= 0:
+        if pos["shares"] <= 0:
             continue
         out.append((strat, entry, pos["adjusted_stop"]))
     return out

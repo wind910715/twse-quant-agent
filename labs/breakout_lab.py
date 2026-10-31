@@ -166,7 +166,7 @@ def run_book(prepped, cands):
         if not isinstance(entry_idx, (int, np.integer)):
             continue
         sz = calc_position_size(c["entry_price"], c["hard_stop"])
-        if sz["lots"] <= 0:
+        if sz["shares"] <= 0:
             continue
         sim = simulate_exit(df, int(entry_idx), c["entry_price"], sz["adjusted_stop"])
         if sim["censored"]:
