@@ -1,1 +1,2 @@
 {"date": "2026-11-02", "time": "09:53:17", "stock_id": "2603", "stock_name": "長榮", "strategy": "S2_量增突破", "event": "ENTRY", "price": 273.5, "shares": 128, "remaining_shares": 128, "entry_price": 273.5, "gain_pct": null}
+{"date": "2026-11-04", "time": "09:50:45", "stock_id": "2603", "stock_name": "長榮", "strategy": "S2_量增突破", "event": "STOPPED_OUT", "price": 261.5, "shares": 128, "remaining_shares": 0, "entry_price": 273.5, "gain_pct": -4.39}
