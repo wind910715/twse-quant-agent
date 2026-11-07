@@ -282,7 +282,10 @@ def main():
                         and results.get("sharpe", 0) > results.get("bench_sharpe", 0)
                         and results["half1"]["strategy"] > results["half1"]["bench"]
                         and results["half2"]["strategy"] > results["half2"]["bench"]
-                        and beats >= 7)}
+                        and beats >= 7
+                        and results["trades"]["n"] >= 30
+                        and results["trades"]["avg_return_pct"] > 0
+                        and results["trades"]["rr"] >= 1.8)}
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
