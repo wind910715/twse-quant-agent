@@ -1,0 +1,52 @@
+# Research backtests for the 20 candidate stock-picking logics (2026-11-07).
+# Manual dispatch ONLY. No schedule. Never touches production state files
+# (no sync commits, no TG notify). Results are uploaded as artifacts and
+# written to labs/results/ on the research branch only.
+name: revenue-backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: 'Strategy to backtest (A: revenue momentum+new high, B: SURGE, D: trust+revenue)'
+        required: true
+        default: 'A'
+        type: choice
+        options: ['A', 'B', 'D']
+      grid:
+        description: 'Run the 9-group neighbour-parameter grid too'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/revenue-20261107
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -q pandas numpy requests yfinance
+      - name: Fetch data (FinMind revenue + prices, 0050 benchmark)
+        run: python3 labs/fetch_revenue_data.py --out labs/data_cache
+      - name: Run backtest
+        run: |
+          GRID=""
+          if [ "${{ inputs.grid }}" = "true" ]; then GRID="--grid"; fi
+          python3 labs/revenue_backtest.py --strategy ${{ inputs.strategy }} \
+            --data labs/data_cache \
+            --out labs/results/revenue_${{ inputs.strategy }}_20261107.json $GRID
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenue-${{ inputs.strategy }}-results
+          path: |
+            labs/results/revenue_${{ inputs.strategy }}_20261107.json
+            labs/data_cache/fetch_log.json
