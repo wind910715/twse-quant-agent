@@ -57,13 +57,25 @@ def _get_json(url):
     return json.loads(raw.decode("utf-8"))
 
 
+class QuotaBudgetExceeded(RuntimeError):
+    """Raised when the per-run FinMind request budget is exhausted."""
+
+
+REQUEST_COUNT = 0
+REQUEST_BUDGET = None
+
+
 def fetch(dataset, data_id, start, end, retries=3):
+    global REQUEST_COUNT
     q = {"dataset": dataset, "start_date": start, "end_date": end}
     if data_id:
         q["data_id"] = data_id
     url = BASE + "?" + urllib.parse.urlencode(q)
     last_err = None
     for attempt in range(retries):
+        REQUEST_COUNT += 1
+        if REQUEST_BUDGET is not None and REQUEST_COUNT > REQUEST_BUDGET:
+            raise QuotaBudgetExceeded(f"request budget {REQUEST_BUDGET} reached")
         try:
             d = _get_json(url)
             if d.get("status") != 200:
@@ -128,6 +140,14 @@ def fetch_series(stock_ids, dataset, start, end, parts_dir, prefix, colmap, pace
                 for src, dst in colmap.items():
                     row[dst] = r.get(src)
                 buf.append(row)
+        except QuotaBudgetExceeded:
+            print(f"[{prefix}] BUDGET reached after {i}/{len(todo)}, "
+                  f"stopping cleanly (resume with --resume)", flush=True)
+            if buf:
+                part_no += 1
+                pd.DataFrame(buf).to_csv(
+                    os.path.join(parts_dir, f"{prefix}_{part_no:03d}.csv"), index=False)
+            return failed, True
         except Exception as e:
             failed.append(sid)
             print(f"[{prefix}] FAIL {sid}: {e}", flush=True)
@@ -145,7 +165,7 @@ def fetch_series(stock_ids, dataset, start, end, parts_dir, prefix, colmap, pace
         part_no += 1
         pd.DataFrame(buf).to_csv(
             os.path.join(parts_dir, f"{prefix}_{part_no:03d}.csv"), index=False)
-    return failed
+    return failed, False
 
 
 def combine(parts_dir, prefix, out_path):
@@ -154,7 +174,8 @@ def combine(parts_dir, prefix, out_path):
         if fn.startswith(prefix) and fn.endswith(".csv"):
             frames.append(pd.read_csv(os.path.join(parts_dir, fn)))
     if not frames:
-        raise RuntimeError(f"no parts for {prefix}")
+        print(f"[combine] {prefix}: no parts yet, skipping", flush=True)
+        return None
     df = pd.concat(frames, ignore_index=True)
     df.to_csv(out_path, index=False)
     print(f"[combine] {prefix}: {len(df)} rows -> {out_path}", flush=True)
@@ -171,11 +192,18 @@ def fetch_benchmark(out_dir):
 
 
 def main():
+    global REQUEST_BUDGET
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="labs/data_cache")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--pace", type=float, default=0.15)
+    ap.add_argument("--max-requests", type=int, default=0,
+                    help="Stop cleanly after this many FinMind API calls "
+                         "(0 = unlimited). Resume re-runs skip done stocks.")
+    ap.add_argument("--only", choices=["all", "revenue", "prices", "benchmark"],
+                    default="all", help="Run one phase only.")
     args = ap.parse_args()
+    REQUEST_BUDGET = args.max_requests or None
     out_dir = args.out
     parts_dir = os.path.join(out_dir, "parts")
     os.makedirs(parts_dir, exist_ok=True)
@@ -185,26 +213,36 @@ def main():
     if args.limit:
         ids = ids[: args.limit]
         print(f"[limit] testing with first {args.limit} stocks", flush=True)
-    failed_rev = fetch_series(ids, "TaiwanStockMonthRevenue", "2013-01-01",
-                              "2026-10-31", parts_dir, "revenue",
-                              {"date": "date", "revenue_year": "revenue_year",
-                               "revenue_month": "revenue_month",
-                               "revenue": "revenue"}, pace=args.pace)
-    failed_px = fetch_series(ids, "TaiwanStockPrice", "2014-06-02",
-                             "2026-10-31", parts_dir, "prices",
-                             {"date": "date", "open": "open", "max": "high",
-                              "min": "low", "close": "close",
-                              "Trading_Volume": "volume",
-                              "Trading_money": "amount"}, pace=args.pace)
-    combine(parts_dir, "revenue", os.path.join(out_dir, "revenue.csv"))
-    combine(parts_dir, "prices", os.path.join(out_dir, "prices.csv"))
-    fetch_benchmark(out_dir)
+    failed_rev, failed_px, budget_hit = [], [], False
+    if args.only in ("all", "revenue"):
+        failed_rev, budget_hit = fetch_series(
+            ids, "TaiwanStockMonthRevenue", "2013-01-01", "2026-10-31",
+            parts_dir, "revenue",
+            {"date": "date", "revenue_year": "revenue_year",
+             "revenue_month": "revenue_month", "revenue": "revenue"},
+            pace=args.pace)
+    if not budget_hit and args.only in ("all", "prices"):
+        failed_px, budget_hit = fetch_series(
+            ids, "TaiwanStockPrice", "2014-06-02", "2026-10-31",
+            parts_dir, "prices",
+            {"date": "date", "open": "open", "max": "high", "min": "low",
+             "close": "close", "Trading_Volume": "volume",
+             "Trading_money": "amount"}, pace=args.pace)
+    if args.only in ("all", "revenue"):
+        combine(parts_dir, "revenue", os.path.join(out_dir, "revenue.csv"))
+    if args.only in ("all", "prices"):
+        combine(parts_dir, "prices", os.path.join(out_dir, "prices.csv"))
+    if args.only in ("all", "benchmark") and not budget_hit:
+        fetch_benchmark(out_dir)
     log.update({"universe": len(ids), "failed_revenue": failed_rev,
-                "failed_prices": failed_px,
+                "failed_prices": failed_px, "budget_stopped": budget_hit,
                 "elapsed_sec": round(time.time() - t0, 1)})
     with open(os.path.join(out_dir, "fetch_log.json"), "w") as f:
         json.dump(log, f, ensure_ascii=False, indent=1)
-    print("[done]", json.dumps(log, ensure_ascii=False), flush=True)
+    if budget_hit:
+        print("[budget-stopped]", json.dumps(log, ensure_ascii=False), flush=True)
+    else:
+        print("[done]", json.dumps(log, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

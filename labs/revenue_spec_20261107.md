@@ -79,7 +79,21 @@
 ## 資料來源
 
 - 月營收：FinMind `TaiwanStockMonthRevenue`（已驗證可用，free tier）。
-- 日價量：FinMind `TaiwanStockPrice`（free tier 可用）。
+  免費額度為每小時 600 次請求（帶 token），超額回 HTTP 402
+  `Requests reach the upper limit.`，下個整點重置。2026-11-07 實測：
+  一小時內約 570 次請求即觸頂，月營收 1939 檔需分三個整點時段抓完
+  （`--max-requests 550` 分段＋`--resume` 續抓）；不帶 data_id 的全市場
+  一次抓取需付費方案，免費版不適用。
+- 日價量：yfinance（2026-11-07 改版原因：FinMind 免費額度每小時僅 600 次，
+  日價 1939 檔再燒 3.5 小時額度不划算；yfinance 一次可抓多檔，約 20 次請求
+  抓完全市場）。**重要揭露**：實測 20 檔交叉驗證，yfinance 台股收盤價為
+  除息調整後價格（與 FinMind 原始收盤價的比值自 2014 年 0.736 逐年收斂至
+  2023 年 1.000，符合累積除息調整型態；中位數差異 0.0%，差異全來自除息
+  調整與停牌日）。因此策略腿與 0050 基準皆為含息總報酬口徑，兩邊對照公平；
+  與 FinLab 以原始價計的公開數字僅作方向對照，不得直接比年化高低。
+  成交金額以收盤價×成交量估算（yfinance 無成交金額欄位；與 FinMind 成交
+  金額中位數差異 0.27%，早期年份因除息調整會低估，B 策略的 2,000 萬門檻
+  為粗篩，影響有限，特此揭露）。
 - 法人買賣超：FinMind `TaiwanStockInstitutionalInvestorsBuySell`（待驗證）。
 - 0050 含息基準：yfinance 0050.TW 還原價。
 - 資料先在本機抓取存檔、commit 至研究分支，Actions 只做計算（不依賴即時 API
@@ -88,8 +102,12 @@
 ## 執行方式
 
 - 程式：`labs/revenue_backtest.py`，`--strategy A|B|D`，結果寫
-  `labs/results/revenue_<strategy>_20261107.json`。
+  `labs/results/revenue_<strategy>_20261107.json`；抓資料程式
+  `labs/fetch_revenue_data.py`（月營收，FinMind，分段抓取）與
+  `labs/fetch_prices_yfinance.py`（日價，yfinance）。
 - Workflow：`.github/workflows/revenue_backtest.yml`（手動 dispatch 專用，
-  無排程，不得干擾 quant_agent.yml 生產排程）。
+  無排程，不得干擾 quant_agent.yml 生產排程）。Actions 不抓 FinMind 月營收，
+  直接用分支上已 commit 的 `labs/data_cache/revenue.csv`；日價在 Actions 內
+  以 yfinance 現抓，結果 JSON commit 回分支。
 - 分支：`research/revenue-20261107`，main 不動；結果驗證後才由使用者決定
   是否併入主系統或另立策略。

@@ -1,7 +1,16 @@
 # Research backtests for the 20 candidate stock-picking logics (2026-11-07).
 # Manual dispatch ONLY. No schedule. Never touches production state files
 # (no sync commits, no TG notify). Results are uploaded as artifacts and
-# written to labs/results/ on the research branch only.
+# committed back to the research branch as labs/results/*.json.
+#
+# Data flow (frozen 2026-11-07, see labs/revenue_spec_20261107.md):
+# - Monthly revenue comes from labs/data_cache/revenue.csv COMMITTED on this
+#   branch (fetched locally in hourly slices: FinMind free tier is 600
+#   requests/hour, so Actions never re-fetches it).
+# - Daily prices are fetched fresh here via yfinance (bulk, ~20 calls, no
+#   FinMind quota). yfinance TW closes are dividend-adjusted; the strategy
+#   leg and the 0050 benchmark are both total-return, so the comparison is
+#   internally consistent (disclosed in the spec).
 name: revenue-backtest
 
 on:
@@ -19,12 +28,13 @@ on:
         default: true
         type: boolean
 
+permissions:
+  contents: write
+
 jobs:
   backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    env:
-      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,8 +44,12 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -q pandas numpy requests yfinance
-      - name: Fetch data (FinMind revenue + prices, 0050 benchmark)
-        run: python3 labs/fetch_revenue_data.py --out labs/data_cache
+      - name: Check committed revenue data present
+        run: |
+          test -s labs/data_cache/revenue.csv || (echo "revenue.csv missing from branch; fetch it locally first" && exit 1)
+          wc -l labs/data_cache/revenue.csv
+      - name: Fetch daily prices via yfinance
+        run: python3 labs/fetch_prices_yfinance.py --universe labs/data_cache/universe.csv --out labs/data_cache
       - name: Run backtest
         run: |
           GRID=""
@@ -49,7 +63,7 @@ jobs:
           name: revenue-${{ inputs.strategy }}-results
           path: |
             labs/results/revenue_${{ inputs.strategy }}_20261107.json
-            labs/data_cache/fetch_log.json
+            labs/data_cache/prices_yf_log.json
       - name: Commit results to research branch
         run: |
           git config user.name "muse-research"
