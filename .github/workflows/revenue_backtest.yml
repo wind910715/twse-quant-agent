@@ -1,0 +1,73 @@
+# Research backtests for the 20 candidate stock-picking logics (2026-11-07).
+# Manual dispatch ONLY. No schedule. Never touches production state files
+# (no sync commits, no TG notify). Results are uploaded as artifacts and
+# committed back to the research branch as labs/results/*.json.
+#
+# Data flow (frozen 2026-11-07, see labs/revenue_spec_20261107.md):
+# - Monthly revenue comes from labs/data_cache/revenue.csv COMMITTED on this
+#   branch (fetched locally in hourly slices: FinMind free tier is 600
+#   requests/hour, so Actions never re-fetches it).
+# - Daily prices are fetched fresh here via yfinance (bulk, ~20 calls, no
+#   FinMind quota). yfinance TW closes are dividend-adjusted; the strategy
+#   leg and the 0050 benchmark are both total-return, so the comparison is
+#   internally consistent (disclosed in the spec).
+name: revenue-backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: 'Strategy to backtest (A: revenue momentum+new high, B: SURGE, D: trust+revenue)'
+        required: true
+        default: 'A'
+        type: choice
+        options: ['A', 'B', 'D']
+      grid:
+        description: 'Run the 9-group neighbour-parameter grid too'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/revenue-20261107
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -q pandas numpy requests yfinance
+      - name: Check committed revenue data present
+        run: |
+          test -s labs/data_cache/revenue.csv || (echo "revenue.csv missing from branch; fetch it locally first" && exit 1)
+          wc -l labs/data_cache/revenue.csv
+      - name: Fetch daily prices via yfinance
+        run: python3 labs/fetch_prices_yfinance.py --universe labs/data_cache/universe.csv --out labs/data_cache
+      - name: Run backtest
+        run: |
+          GRID=""
+          if [ "${{ inputs.grid }}" = "true" ]; then GRID="--grid"; fi
+          python3 labs/revenue_backtest.py --strategy ${{ inputs.strategy }} \
+            --data labs/data_cache \
+            --out labs/results/revenue_${{ inputs.strategy }}_20261107.json $GRID
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenue-${{ inputs.strategy }}-results
+          path: |
+            labs/results/revenue_${{ inputs.strategy }}_20261107.json
+            labs/data_cache/prices_yf_log.json
+      - name: Commit results to research branch
+        run: |
+          git config user.name "muse-research"
+          git config user.email "muse-research@local"
+          git add labs/results/
+          git diff --cached --quiet || git commit -m "results: revenue strategy ${{ inputs.strategy }} backtest 2026-11-07"
+          git push origin HEAD:research/revenue-20261107
