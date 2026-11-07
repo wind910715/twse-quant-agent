@@ -16,7 +16,7 @@ on:
       grid:
         description: 'Run the 9-group neighbour-parameter grid too'
         required: false
-        default: false
+        default: true
         type: boolean
 
 jobs:
