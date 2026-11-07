@@ -63,7 +63,16 @@ def _mis_get(codes, tries=3):
         except Exception as e:
             last = e
             time.sleep(1.5 * (i + 1))
-    raise last
+    # curl 備援（urllib 讀 chunked 偶爾 IncompleteRead）
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["curl", "-sS", "-m", "20", "-A", UA["User-Agent"],
+             MIS_URL.format(codes="|".join(codes))],
+            capture_output=True, text=True, timeout=30).stdout
+        return json.loads(out)
+    except Exception:
+        raise last
 
 
 def _parse_mis_item(it):
@@ -145,7 +154,19 @@ def realtime_futures(kind_id="1"):
             last = e
             time.sleep(2 * (i + 1))
     if d is None:
-        raise last
+        # curl 備援（urllib 讀 chunked 偶爾 IncompleteRead／斷線）
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["curl", "-sS", "-m", "30", "-A", UA["User-Agent"], "-X", "POST",
+                 "-H", "Content-Type: application/json;charset=UTF-8",
+                 "-H", "Referer: " + UA["Referer"],
+                 "-H", "Accept: application/json, text/plain, */*",
+                 "-d", body.decode("utf-8"), TAIFEX_MIS_URL],
+                capture_output=True, text=True, timeout=40).stdout
+            d = json.loads(out)
+        except Exception:
+            raise last
     if d.get("RtCode") != "0":
         raise RuntimeError(f"TAIFEX MIS RtCode={d.get('RtCode')}: {d.get('RtMsg')}")
     rows = []
