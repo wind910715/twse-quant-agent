@@ -78,11 +78,14 @@
 
 ## 資料來源
 
-- 月營收：FinMind `TaiwanStockMonthRevenue`（已驗證可用，free tier）。
-  免費額度為每小時 600 次請求（帶 token），超額回 HTTP 402
-  `Requests reach the upper limit.`，下個整點重置。2026-11-07 實測：
-  一小時內約 570 次請求即觸頂，月營收 1939 檔需分三個整點時段抓完
-  （`--max-requests 550` 分段＋`--resume` 續抓）；不帶 data_id 的全市場
+- 月營收：MOPS 公開資訊觀測站 `t21sc03`（每月一頁／市場，2013-01 起，
+  `labs/fetch_revenue_mops.py`，2026-11-07 改版原因：FinMind 免費額度每小時
+  僅 600 次，月營收 1939 檔需分三個整點時段抓完；MOPS 無額度限制，332 頁
+  約半小時抓完）。與 FinMind 交叉驗證：已抓的 500 檔 FinMind 營收中 485 筆
+  重疊，全數差異 0.00%，MOPS 即 FinMind 的上游來源，兩者一致。FinMind 分段
+  抓取已退役（每小時排程 `revenue-fetch-slices` 已刪除），僅留已抓的 500 檔
+  作驗證集。FinMind 免費額度仍為每小時 600 次（帶 token），超額回 HTTP 402
+  `Requests reach the upper limit.`，下個整點重置；不帶 data_id 的全市場
   一次抓取需付費方案，免費版不適用。
 - 日價量：yfinance（2026-11-07 改版原因：FinMind 免費額度每小時僅 600 次，
   日價 1939 檔再燒 3.5 小時額度不划算；yfinance 一次可抓多檔，約 20 次請求
@@ -94,8 +97,15 @@
   成交金額以收盤價×成交量估算（yfinance 無成交金額欄位；與 FinMind 成交
   金額中位數差異 0.27%，早期年份因除息調整會低估，B 策略的 2,000 萬門檻
   為粗篩，影響有限，特此揭露）。
-- 法人買賣超：FinMind `TaiwanStockInstitutionalInvestorsBuySell`（待驗證）。
+- 法人買賣超：證交所網站 JSON（2026-11-07 實測；證交所 OpenAPI 無此端點）。
+  外資 `fund/TWT38U`、投信 `fund/TWT44U`，皆可用 `?date=YYYYMMDD` 查歷史；
+  投信只有當日有交易的檔（約 210 檔／日），缺席＝0。策略 D 的投信買超即
+  TWT44U。常用查詢已包成 `labs/twdata/` 套件（見下）。
 - 0050 含息基準：yfinance 0050.TW 還原價。
+- 常用查詢套件 `labs/twdata/`：日價（證交所＋櫃買最新收盤）／月營收（MOPS）
+  ／融資融券（MI_MARGN）／本益比・殖利率・淨值比（BWIBBU_d）／三大法人
+  （TWT38U 外資＋TWT44U 投信），`cd labs && python -m twdata.cli fetch <kind>`。
+  限制：OpenAPI 多為最新交易日快照、無歷史；上櫃法人／融資端點待確認。
 - 資料先在本機抓取存檔、commit 至研究分支，Actions 只做計算（不依賴即時 API
   額度），結果以 artifacts＋結果 JSON 回傳，不得直接寫入 main 生產狀態檔。
 
@@ -103,11 +113,13 @@
 
 - 程式：`labs/revenue_backtest.py`，`--strategy A|B|D`，結果寫
   `labs/results/revenue_<strategy>_20261107.json`；抓資料程式
-  `labs/fetch_revenue_data.py`（月營收，FinMind，分段抓取）與
+  `labs/fetch_revenue_mops.py`（月營收，MOPS）與
   `labs/fetch_prices_yfinance.py`（日價，yfinance）。
 - Workflow：`.github/workflows/revenue_backtest.yml`（手動 dispatch 專用，
-  無排程，不得干擾 quant_agent.yml 生產排程）。Actions 不抓 FinMind 月營收，
-  直接用分支上已 commit 的 `labs/data_cache/revenue.csv`；日價在 Actions 內
-  以 yfinance 現抓，結果 JSON commit 回分支。
+  無排程，不得干擾 quant_agent.yml 生產排程）。Actions 不抓月營收，
+  直接用分支上已 commit 的 `labs/data_cache/revenue.csv`（`labs/data_cache/`
+  在 .gitignore 內，須以 API helper `labs/gh_update_branch.py` 寫入分支，
+  一般 git add 會跳過）；日價在 Actions 內以 yfinance 現抓，結果 JSON
+  commit 回分支。
 - 分支：`research/revenue-20261107`，main 不動；結果驗證後才由使用者決定
   是否併入主系統或另立策略。
