@@ -50,3 +50,10 @@ jobs:
           path: |
             labs/results/revenue_${{ inputs.strategy }}_20261107.json
             labs/data_cache/fetch_log.json
+      - name: Commit results to research branch
+        run: |
+          git config user.name "muse-research"
+          git config user.email "muse-research@local"
+          git add labs/results/
+          git diff --cached --quiet || git commit -m "results: revenue strategy ${{ inputs.strategy }} backtest 2026-11-07"
+          git push origin HEAD:research/revenue-20261107
