@@ -6,14 +6,16 @@
     python -m twdata.cli fetch valuation
     python -m twdata.cli fetch institutional --date 20261030
     python -m twdata.cli fetch institutional-tpex
+    python -m twdata.cli fetch quotes [--symbols 2330,5483]
+    python -m twdata.cli fetch futures
 CSVs are written to --out (default data_cache/twdata).
 """
 import argparse
 import os
 
 from twdata import (daily_close, institutional, institutional_tpex,
-                    margin_balance, monthly_revenue, revenue_latest,
-                    valuation)
+                    margin_balance, monthly_revenue, realtime_futures,
+                    realtime_quotes, revenue_latest, valuation)
 
 
 def main():
@@ -22,8 +24,11 @@ def main():
     f = sub.add_parser("fetch")
     f.add_argument("kind", choices=["daily", "revenue", "revenue-latest",
                                    "margin", "valuation", "institutional",
-                                   "institutional-tpex"])
+                                   "institutional-tpex", "realtime",
+                                   "quotes", "futures"])
     f.add_argument("--date", default=None, help="YYYYMMDD (institutional)")
+    f.add_argument("--symbols", default="",
+                   help="comma-separated stock ids for quotes, e.g. 2330,5483")
     f.add_argument("--year", type=int, default=None)
     f.add_argument("--month", type=int, default=None)
     f.add_argument("--market", default="both", choices=["sii", "otc", "both"])
@@ -49,6 +54,11 @@ def main():
         df, name = institutional(args.date), f"institutional_{args.date}"
     elif args.kind == "institutional-tpex":
         df, name = institutional_tpex(), "institutional_tpex"
+    elif args.kind == "realtime":
+        import json as _json
+        from twdata.realtime import realtime_dashboard
+        print(_json.dumps(realtime_dashboard(), ensure_ascii=False, indent=1))
+        return
     else:
         ap.error(f"unknown kind {args.kind}")
 

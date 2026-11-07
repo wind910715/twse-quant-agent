@@ -47,3 +47,19 @@ inst = institutional("20261030")   # 2026-10-30 上市外資+投信買賣超（�
 
 - `twse_swagger.json`：證交所 OpenAPI 完整規格（143 個端點，2026-11-07 下載）。
 - `tpex_swagger.json`：櫃買 OpenAPI 完整規格（225 個端點，2026-11-07 下載）。
+
+## 即時報價 `realtime.py`（2026-11-07 實測）
+
+免費免金鑰，兩支交易所網站內部 API（非官方開放平台，可能改版或限流；
+券商 API 為較穩備援）。休市回最後一筆；盤中即時跳動待週一開盤再確認。
+
+- `realtime_stocks(stock_ids)`：個股即時（證交所 MIS，上市／上櫃自動判別，
+  現價／昨收／開高低／量／最佳買賣價）。
+- `realtime_index()`：加權（t00）＋上櫃（o00）指數。
+- `realtime_futures(kind_id="1")`：期交所 MIS getQuoteList（POST），KindID=1
+  為台指期（TXF-S 現貨＋TXFK6 近月等），含現價／買賣盤／量／未平倉／結算／
+  更新時間。注意：該站偶爾 302 轉址，模組內有 POST-preserving redirect
+  handler；另有 3 次重試。
+- `realtime_dashboard()`：儀表板三項（加權／上櫃／台指期近月）一次回傳 dict。
+
+CLI：`cd labs && python -m twdata.cli fetch realtime`
