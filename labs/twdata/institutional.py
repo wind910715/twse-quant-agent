@@ -15,7 +15,7 @@ All nets are in shares. 投信 15 張 = 15,000 shares.
 """
 import pandas as pd
 
-from twdata.client import get_json, to_int
+from twdata.client import get_json, roc_to_iso, to_int
 
 FOREIGN_URL = "https://www.twse.com.tw/fund/TWT38U?response=json&date={date}"
 TRUST_URL = "https://www.twse.com.tw/fund/TWT44U?response=json&date={date}"
@@ -61,3 +61,44 @@ def institutional(date):
               "trust_buy", "trust_sell", "trust_net"):
         m[c] = m[c].fillna(0).astype(int)
     return m
+
+
+# --- TPEx (OTC) institutional, latest trading day only ---
+# /tpex_3insti_daily_trading: 上櫃股票三大法人買賣明細資訊 (per stock,
+# all three investor types). No date parameter - latest day only, so it
+# cannot backfill history; use it for ongoing daily capture. Values are
+# in shares. Verified 2026-11-07 via curl (urllib truncates this ~875KB
+# response; client.get_json now falls back to curl).
+TPEX_3INSTI_URL = "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading"
+
+
+def institutional_tpex():
+    """OTC institutional buy/sell, latest trading day (TPEx OpenAPI)."""
+    rows = get_json(TPEX_3INSTI_URL, pace=0)
+    out = []
+    for r in rows:
+        r = {str(k).strip(): v for k, v in r.items()}
+        out.append({
+            "stock_id": r["SecuritiesCompanyCode"].strip(),
+            "date": roc_to_iso(r["Date"]),
+            "foreign_buy": to_int(r.get(
+                "Foreign Investors include Mainland Area Investors "
+                "(Foreign Dealers excluded)-Total Buy")),
+            "foreign_sell": to_int(r.get(
+                "Foreign Investors include Mainland Area Investors "
+                "(Foreign Dealers excluded)-Total Sell")),
+            "foreign_net": to_int(r.get(
+                "Foreign Investors include Mainland Area Investors "
+                "(Foreign Dealers excluded)-Difference")),
+            "trust_buy": to_int(r.get(
+                "SecuritiesInvestmentTrustCompanies-TotalBuy")),
+            "trust_sell": to_int(r.get(
+                "SecuritiesInvestmentTrustCompanies-TotalSell")),
+            "trust_net": to_int(r.get(
+                "SecuritiesInvestmentTrustCompanies-Difference")),
+            "dealer_buy": to_int(r.get("Dealers-TotalBuy")),
+            "dealer_sell": to_int(r.get("Dealers-TotalSell")),
+            "dealer_net": to_int(r.get("Dealers-Difference")),
+            "market": "tpex",
+        })
+    return pd.DataFrame(out)
