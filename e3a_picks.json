@@ -1,0 +1,123 @@
+{
+ "version": "E3a+stop (E3c v3)",
+ "strategy": "E3a",
+ "entry_rule": "C (spec §12.1)",
+ "exit_rule": "C2 (no TP cap, no time limit, MA20 break + 20% giveback trail + hard stop)",
+ "etf_rule": "E3a idle cash into 0050 + E3c v3 tech-stop priority",
+ "signal_date": "2026-11-10",
+ "confirm_date": "2026-11-11",
+ "generated_at": "2026-11-11 (branch verification)",
+ "signals": [
+  {
+   "stock_id": "3147",
+   "strategy": "S2_量增突破",
+   "entry_price": 351.0,
+   "hard_stop": 342.22,
+   "sources": [
+    "RS60",
+    "RS52"
+   ],
+   "rs_year": 96.5968,
+   "rs_quarter": 96.8173,
+   "signal_date": "2026-11-10",
+   "shares": 1000
+  },
+  {
+   "stock_id": "5230",
+   "strategy": "S2_量增突破",
+   "entry_price": 30.85,
+   "hard_stop": 30.08,
+   "sources": [
+    "A",
+    "RS60",
+    "RS52"
+   ],
+   "rs_year": 95.7609,
+   "rs_quarter": 97.7528,
+   "signal_date": "2026-11-10",
+   "shares": 1000
+  },
+  {
+   "stock_id": "6112",
+   "strategy": "S2_量增突破",
+   "entry_price": 57.0,
+   "hard_stop": 55.57,
+   "sources": [
+    "A",
+    "RS60",
+    "RS52"
+   ],
+   "rs_year": 86.9319,
+   "rs_quarter": 92.452,
+   "signal_date": "2026-11-10",
+   "shares": 1000
+  },
+  {
+   "stock_id": "6757",
+   "strategy": "S2_量增突破",
+   "entry_price": 59.3,
+   "hard_stop": 57.82,
+   "sources": [
+    "RS60"
+   ],
+   "rs_year": 59.4522,
+   "rs_quarter": 80.5512,
+   "signal_date": "2026-11-10",
+   "shares": 1000
+  }
+ ],
+ "etf_leg": {
+  "status": "holding",
+  "entry_price": 99.7,
+  "shares": 1000,
+  "tech_stop": 94.5,
+  "tech_stop_source": "prev_day_low",
+  "tech_stop_detail": "11-09 低點",
+  "ma20": 105.73,
+  "peak_close": 99.7,
+  "realized_pnl": 0.0,
+  "ma20_asof": "2026-11-09",
+  "conflict": "bought_below_ma20",
+  "ma20_on_buy_close": 104.97
+ },
+ "frozen_backtest": {
+  "strategy": "E3a",
+  "entry": "C (spec §12.1)",
+  "exit": "C2 (no TP cap, no time limit, MA20 break + 20% giveback trail + hard stop)",
+  "idle_cash": "buy 0050 when no stock holdings (E3a, no stop on ETF leg)",
+  "etf_stop_overlay": "E3c v3 tech-stop priority (prev-day low -> low30 close x0.99 -> fixed x0.95)",
+  "backtest_E3a": {
+   "n": 2546,
+   "win_rate_pct": 61.55,
+   "avg_pct": 3.38,
+   "rr": 2.82,
+   "total_return_pct": 2415.16,
+   "annualized_pct": 63.31,
+   "sharpe": 2.26,
+   "mdd_pct": -23.82,
+   "half1_pct": 333.45,
+   "half2_pct": 480.26,
+   "verdict": "PASS"
+  },
+  "backtest_E3c_v3": {
+   "n": 2609,
+   "win_rate_pct": 61.67,
+   "avg_pct": 3.36,
+   "rr": 2.8,
+   "total_return_pct": 1186.07,
+   "annualized_pct": 47.47,
+   "sharpe": 2.88,
+   "mdd_pct": -10.35,
+   "half1_pct": 326.53,
+   "half2_pct": 201.52,
+   "verdict": "FAIL (H2 only)"
+  },
+  "bench_0050_half2_pct": 260.04
+ },
+ "method_notes": [
+  "Signals are strategy_core.evaluate_candidate S0-S4 (SSOT); this module adds only entry/exit/idle-cash layers.",
+  "Close>=trigger is a daily-K proxy for holding above trigger, NOT verified 15-min behaviour.",
+  "0050 sell price in backtest proxies the open with the entry-day close (no 0050 open in local cache); 0050 prices are adjusted (incl. dividends).",
+  "E3a PASS (n=2546, RR 2.82, H2 +480.26%) is the no-stop ETF-leg version; live E3a+stop is E3c v3 (FAIL, H2 only, +201.52%), MDD -10.35% vs E3a -23.82%."
+ ]
+}
