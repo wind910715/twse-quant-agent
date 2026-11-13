@@ -27,7 +27,8 @@
 ## 對照設計
 
 - Harness：`backtest.py` v2（與實盤共用 `strategy_core.evaluate_candidate`）。
-- Universe：`build_dynamic_index_universe()`（上限 220 檔）；期間 2020-01-01 起；成本買 0.1425%／賣 0.4425%。
+- Universe：`build_dynamic_index_universe()`（上限 220 檔）；期間 2016-01-01 起至最新資料（2026 年）；成本買 0.1425%／賣 0.4425%。
+  （2026-11-14 01:36 使用者更正：回測期間一律 2016-2026 年；`backtest.py` 原寫死 2020-01-01 已同步改為 2016-01-01，兩個分支皆改，改動發生在任何 run 啟動之前。）
 - Baseline：`variant/v1-baseline` 分支＝當日 live working tree 原樣（未改版），同 harness 跑一次。
 - Variant：`variant/v1-stopfix` 分支＝baseline＋上述唯一變因，同 harness 跑一次。
 - 2026-10-31 的 `latest_backtest.json`（總勝率 51.5%、RR 2.07）因策略名單已改版（舊 C21/C02），不得當本次 baseline。
