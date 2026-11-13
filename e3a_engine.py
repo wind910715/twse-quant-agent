@@ -13,9 +13,12 @@ e3a_engine.py — E3a 選股邏輯的單一真相來源 (SSOT)，與 strategy_co
   * C 進場：new_rules_spec_20261110.md §12.1。
   * C2 出場：同上 §12.2 (無 TP 封頂、無時限、收盤破 MA20＋回吐 20% 移動停損＋技術停損)。
   * E3a：spec_E3_20261110.md — 空檔現金買 0050，無停損停利；結果
-    results/new_rules_E3a_backtest_20261110.json：n=2,546、勝率 61.55%、平均 +3.38%、
-    RR 2.82、總報酬 +2,415.16%、年化 63.31%、夏普 2.26、MDD -23.82%、
-    H1 +333.45%、H2 +480.26% vs 0050 +260.04%，PASS (全部裡面唯一 PASS)。
+    results/new_rules_E3a_backtest_20261111_venv_rerun.json（venv python，
+    pandas 3.1.0，與存檔 C2 同口徑、逐筆 0 差異）：n=2,609、勝率 61.67%、平均 +3.36%、
+    RR 2.80、總報酬 +2,444.65%、年化 63.60%、夏普 2.27、MDD -25.09%、
+    H1 +339.59%、H2 +478.88% vs 0050 +260.04%，PASS (全部裡面唯一 PASS)。
+    舊檔 new_rules_E3a_backtest_20261110.json 的 n=2,546／+2,415.16% 是系統 python
+    （pandas 2.1.4）口徑，RS 前 30 平手排序隨版本變造成，已廢棄、不得再引用。
   * E3c v3：spec_E3c_v3_20261110.md — E3a ＋ 0050 技術停損優先
     (日K前一日最低價 → 30 日最低收盤 ×0.99 → 固定進場 ×0.95)；
     結果 n=2,609、勝率 61.67%、RR 2.80、總報酬 +1,186.07%、年化 47.47%、
@@ -51,9 +54,9 @@ E3A_FROZEN = {
     "exit": "C2 (no TP cap, no time limit, MA20 break + 20% giveback trail + hard stop)",
     "idle_cash": "buy 0050 when no stock holdings (E3a, no stop on ETF leg)",
     "etf_stop_overlay": "E3c v3 tech-stop priority (prev-day low -> low30 close x0.99 -> fixed x0.95)",
-    "backtest_E3a": {"n": 2546, "win_rate_pct": 61.55, "avg_pct": 3.38, "rr": 2.82,
-                     "total_return_pct": 2415.16, "annualized_pct": 63.31, "sharpe": 2.26,
-                     "mdd_pct": -23.82, "half1_pct": 333.45, "half2_pct": 480.26, "verdict": "PASS"},
+    "backtest_E3a": {"n": 2609, "win_rate_pct": 61.67, "avg_pct": 3.36, "rr": 2.80,
+                     "total_return_pct": 2444.65, "annualized_pct": 63.60, "sharpe": 2.27,
+                     "mdd_pct": -25.09, "half1_pct": 339.59, "half2_pct": 478.88, "verdict": "PASS"},
     "backtest_E3c_v3": {"n": 2609, "win_rate_pct": 61.67, "avg_pct": 3.36, "rr": 2.80,
                         "total_return_pct": 1186.07, "annualized_pct": 47.47, "sharpe": 2.88,
                         "mdd_pct": -10.35, "half1_pct": 326.53, "half2_pct": 201.52, "verdict": "FAIL (H2 only)"},
@@ -408,7 +411,7 @@ def emit_e3a_picks(signals, etf_leg, signal_date, confirm_date=None, ma20_asof=N
             "Signals are strategy_core.evaluate_candidate S0-S4 (SSOT); this module adds only entry/exit/idle-cash layers.",
             "Close>=trigger is a daily-K proxy for holding above trigger, NOT verified 15-min behaviour.",
             "0050 sell price in backtest proxies the open with the entry-day close (no 0050 open in local cache); 0050 prices are adjusted (incl. dividends).",
-            "E3a PASS (n=2546, RR 2.82, H2 +480.26%) is the no-stop ETF-leg version; live E3a+stop is E3c v3 (FAIL, H2 only, +201.52%), MDD -10.35% vs E3a -23.82%.",
+            "E3a PASS (n=2609, RR 2.80, H2 +478.88%, venv rerun) is the no-stop ETF-leg version; live E3a+stop is E3c v3 (FAIL, H2 only, +201.52%), MDD -10.35% vs E3a -25.09%.",
         ],
     }
 

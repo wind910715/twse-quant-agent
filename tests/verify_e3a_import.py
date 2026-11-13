@@ -9,7 +9,7 @@
   3. 0050 那張：resolve_etf_tech_stop(99.70, prev_day_low=94.50, low30_close=92.50)
      = (94.50, 'prev_day_low')；MA20 截至 11-09 收盤 = 105.73、截至 11-10 收盤 = 104.97，
      任一口徑下 99.70 皆在 MA20 之下 → 按 E3c v3 根本不該買 (已知 Space 衝突，須標示，不得掩蓋)。
-  4. E3a 回測數字引用正確 (E3a PASS：n=2546、RR 2.82、H2 +480.26%；E3c v3 FAIL 僅 H2)。
+  4. E3a 回測數字引用正確 (E3a PASS：n=2609、RR 2.80、H2 +478.88%，venv 重跑口徑；E3c v3 FAIL 僅 H2)。
 
 執行：~/workspace/stock-strategy/venv/bin/python tests/verify_e3a_import.py
 (需本地 data_cache：prices.csv、benchmark_0050.csv；0050_ohlc_adj.csv 在 TSM-srf-sim labs。)
@@ -132,7 +132,8 @@ def main():
     # --- 4. 回測數字引用 ---
     fz = out["frozen_backtest"]
     check("E3a verdict", fz["backtest_E3a"]["verdict"], "PASS")
-    check("E3a H2", fz["backtest_E3a"]["half2_pct"], 480.26)
+    check("E3a H2", fz["backtest_E3a"]["half2_pct"], 478.88)
+    check("E3a n", fz["backtest_E3a"]["n"], 2609)
     check("E3c v3 verdict", fz["backtest_E3c_v3"]["verdict"], "FAIL (H2 only)")
 
     # C 進場公式抽查 (11-11 確認日當日開盤價未定，此處只驗公式)：

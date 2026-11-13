@@ -33,7 +33,7 @@ CONFIG = {
     "BUY_COST_RATE": 0.001425,
     "SELL_COST_RATE": 0.004425,
     "ROUNDTRIP_FRICTION_EST": 0.005,  # 僅用於部位 sizing 的每股風險預估
-    # 三階停利 (SSOT, screener/backtest/monitor 共用)
+    # 三階停利 (舊版 C1 出場，已廢棄，2026-11-11 起選股改走 C2；僅舊版 backtest/screener/monitor 引用而保留)
     "TP1_TARGET_PCT": 0.060, "TP1_REDUCE_RATIO": 0.25, "TP1_LOCK_PCT": 0.015, "TP1_TRAIL_DD": 0.055,
     "TP2_TARGET_PCT": 0.140, "TP2_REDUCE_RATIO": 0.35, "TP2_LOCK_PCT": 0.080, "TP2_TRAIL_DD": 0.055,
     "TP3_TARGET_PCT": 0.250, "TP3_REDUCE_RATIO": 0.20, "TP3_LOCK_PCT": 0.160, "TP3_TRAIL_DD": 0.060,
@@ -192,7 +192,10 @@ def calc_position_size(entry: float, stop: float) -> dict:
 
 
 def calc_exit_plan(entry: float, hard_stop: float, total_shares: int) -> dict:
-    """三階停利計畫 (SSOT)。TP3 減碼股數獨立欄位，不再與尾倉混在一起。"""
+    """三階停利計畫 (舊版 C1 出場，已廢棄，2026-11-11 起不再用於選股)。
+    選股出場一律走 E3a 的 C2（e3a_engine.py：無停利封頂、無時限、破 MA20＋回吐 20%）。
+    本函數僅因舊版 backtest.py／screener 報表／monitor.py 仍引用而保留，不得用於新訊號；
+    screener 夜間報表仍會印出 TP1 價位，待使用者拍板後再改報表。TP3 減碼股數獨立欄位，不再與尾倉混在一起。"""
     tp1_price = round(entry * (1 + CONFIG["TP1_TARGET_PCT"]), 2)
     tp2_price = round(entry * (1 + CONFIG["TP2_TARGET_PCT"]), 2)
     tp3_price = round(entry * (1 + CONFIG["TP3_TARGET_PCT"]), 2)

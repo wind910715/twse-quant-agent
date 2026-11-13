@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+
+labs/data_cache/
+labs/data_cache_test/
+labs/results/
+
+labs/.venv/
