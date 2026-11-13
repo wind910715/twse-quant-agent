@@ -395,8 +395,9 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
        (cur["Close"] > cur["Open"] * 1.012) and (cur["vol_lots"] >= 1.20 * cur["MV5"]) and \
        (candle_pos >= 0.70) and (55 <= cur["RSI14"] <= 72):
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(last5["Low"].min() * 0.996, entry * 0.975)), 2)
-        matched.append(("S0_VCP收斂", entry, stop))
+        stop = round(float(last5["Low"].min() * 0.996), 2)  # V1: 解除 entry*0.975 硬夾，純結構停損
+        if (entry - stop) / entry <= 0.07:  # V1: 停損距離上限 7%，過遠不發訊號
+            matched.append(("S0_VCP收斂", entry, stop))
 
     # S1: 強勢洗盤破底翻 (2B，原 S3)
     dipped_ma10 = (df.iloc[-4:-1]["Low"] < df.iloc[-4:-1]["MA10"] * 0.996).any()
@@ -405,8 +406,9 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
                     (candle_pos >= 0.75) and (cur["vol_lots"] >= 1.35 * cur["MV5"])
     if s_gates_ok and trend_up and dipped_ma10 and power_reclaim and (ud_vol_ratio >= 1.40) and (55 <= cur["RSI14"] <= 68):
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.996, entry * 0.975)), 2)
-        matched.append(("S1_破底翻", entry, stop))
+        stop = round(float(cur["Low"] * 0.996), 2)  # V1: 解除 entry*0.975 硬夾，純結構停損
+        if (entry - stop) / entry <= 0.07:  # V1: 停損距離上限 7%，過遠不發訊號
+            matched.append(("S1_破底翻", entry, stop))
 
     # S2_量增突破 (v3.4 併入，原 BRK20): 優先序在 S0/S1 之後、S3/S4 之前
     # (同日同股多策略時取優先序第一個，S2 不再是最低，S3/S4 在後)。
@@ -414,8 +416,9 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
     # 跳空且結構停損較淺的子集 (<=0.3%), 已於 CHANGES_V34.md 揭露。
     if brk_hit:
         entry = round(float(cur["Close"]), 2)
-        stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-        matched.append(("S2_量增突破", entry, stop))
+        stop = round(float(cur["Low"] * 0.995), 2)  # V1: 解除 entry*0.975 硬夾，純結構停損
+        if (entry - stop) / entry <= 0.07:  # V1: 停損距離上限 7%，過遠不發訊號
+            matched.append(("S2_量增突破", entry, stop))
 
     # S3_起漲股 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
     # 今日最高價 = 100 日最高價（含今日）且上一次同條件距今日 > 100 根（無前次則為首現）。
@@ -436,8 +439,9 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
                 c21_hit = ((len(df) - 1 - prior_idx) > 100)
             if c21_hit:
                 entry = round(float(cur["Close"]), 2)
-                stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-                matched.append(("S3_起漲股", entry, stop))
+                stop = round(float(cur["Low"] * 0.995), 2)  # V1: 解除 entry*0.975 硬夾，純結構停損
+                if (entry - stop) / entry <= 0.07:  # V1: 停損距離上限 7%，過遠不發訊號
+                    matched.append(("S3_起漲股", entry, stop))
 
     # S4_強於大盤 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
     # value1 = 個股收盤 / 加權收盤；up = value1 之 20 日布林上限（均值 + 2x 標準差，ddof=0）；
@@ -458,8 +462,9 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
                         tw = bench_series.loc[:df.index[-1]].dropna()
                         if len(tw) >= 20 and float(tw.iloc[-5:].mean()) > float(tw.iloc[-20:].mean()):
                             entry = round(float(cur["Close"]), 2)
-                            stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-                            matched.append(("S4_強於大盤", entry, stop))
+                            stop = round(float(cur["Low"] * 0.995), 2)  # V1: 解除 entry*0.975 硬夾，純結構停損
+                            if (entry - stop) / entry <= 0.07:  # V1: 停損距離上限 7%，過遠不發訊號
+                                matched.append(("S4_強於大盤", entry, stop))
         except Exception:
             pass
 
