@@ -45,6 +45,7 @@ SLOT_WEIGHT = 1.0 / MAX_CONCURRENT  # 每筆占組合 20%
 # 面板與手算一致、無前視）；若 live 已含 V2b 的 helpers，派發時 rebase 改為共用。
 # RS_MOUNT_THRESHOLD = 80.0（與 R3／A3 同定義：年＋季複合 >= 80）。
 RS_MOUNT_THRESHOLD = 80.0
+RS_S1_FLOOR = 40.0  # V5a: S1 破底翻專用地板；RS_MOUNT 表仍標 False，地板邏輯寫在 apply_rs_mount 內
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -94,16 +95,30 @@ def rs_composite(rs_year, rs_quarter, signal_date, symbol) -> float:
 def apply_rs_mount(sigs, rs_year, rs_quarter, signal_date, symbol):
     """分策略 RS 掛載（凍結規則）。
     RS_MOUNT 表中標 True 的策略，其訊號須複合 RS >= RS_MOUNT_THRESHOLD 才保留；
-    未掛載策略原樣保留。回傳過濾後的新 list（不改動輸入 list 本身）。
+    未掛載策略原樣保留。
+    V5a 新增：S1_破底翻 雖在 RS_MOUNT 表中標 False（不掛 80 門檻），但須
+    rs_composite >= RS_S1_FLOOR (40) 才保留，剃除結構性長空尾端。
+    回傳 (kept_list, s1_floor_skipped_count)。
     """
     kept = []
+    s1_floor_skipped = 0
     for s in sigs:
-        if not RS_MOUNT.get(s["strategy"], False):
-            kept.append(s)
+        strat = s["strategy"]
+        if RS_MOUNT.get(strat, False):
+            # 掛載策略：須 >= RS_MOUNT_THRESHOLD (80)
+            if rs_composite(rs_year, rs_quarter, signal_date, symbol) >= RS_MOUNT_THRESHOLD:
+                kept.append(s)
             continue
-        if rs_composite(rs_year, rs_quarter, signal_date, symbol) >= RS_MOUNT_THRESHOLD:
-            kept.append(s)
-    return kept
+        # V5a: S1 破底翻地板
+        if strat == "S1_破底翻":
+            if rs_composite(rs_year, rs_quarter, signal_date, symbol) >= RS_S1_FLOOR:
+                kept.append(s)
+            else:
+                s1_floor_skipped += 1
+            continue
+        # 其餘未掛載策略原樣保留
+        kept.append(s)
+    return kept, s1_floor_skipped
 
 
 def summarize_rows(rows: list) -> dict:
@@ -152,6 +167,7 @@ def run_portfolio_backtest() -> dict:
     skipped_portfolio_full = 0
     skipped_stock_busy = 0
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
+    skipped_s1_floor = 0  # V5a 診斷計數：S1 被 RS 地板 40 擋下的訊號數（不影響交易行為）
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -199,9 +215,11 @@ def run_portfolio_backtest() -> dict:
                                       chip_info=None, bench_ret_20d=bench_ret20,
                                       market_ok=m_ok, require_chip=False, bench_series=twii_series)
             # ---- V4: 分策略 RS 掛載（凍結掛載表，見 RS_MOUNT）----
+            # ---- V5a: S1 地板 40 （RS_S1_FLOOR）----
             n_sigs = len(sigs)
-            sigs = apply_rs_mount(sigs, rs_year, rs_quarter, dt_idx, t_sym)
-            skipped_rs_mount += n_sigs - len(sigs)
+            sigs, s1_skipped = apply_rs_mount(sigs, rs_year, rs_quarter, dt_idx, t_sym)
+            skipped_rs_mount += n_sigs - len(sigs) - s1_skipped
+            skipped_s1_floor += s1_skipped
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -290,6 +308,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_portfolio_full": skipped_portfolio_full,
             "skipped_stock_busy": skipped_stock_busy,
             "skipped_rs_mount": skipped_rs_mount,
+            "skipped_s1_floor": skipped_s1_floor,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -338,6 +357,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_portfolio_full": skipped_portfolio_full,
         "skipped_stock_busy": skipped_stock_busy,
         "skipped_rs_mount": skipped_rs_mount,
+        "skipped_s1_floor": skipped_s1_floor,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
