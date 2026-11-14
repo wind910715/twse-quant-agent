@@ -141,13 +141,36 @@ def chip_is_positive(chip_info: dict | None) -> bool:
     return bool(total > 0 and (foreign > 0 or invest_trust > 0))
 
 
-def market_regime_ok(bench_close: float, bench_ma20: float, stock_ret_20d: float) -> bool:
+def market_regime_ok(bench_close: float, bench_ma20: float, stock_ret_20d: float,
+                     bench_ma20_prev5: float | None = None) -> bool:
     """
-    大盤濾網 (screener 與 backtest 共用同一函數):
-    0050 跌破月線 1.2% 以上且個股 20 日漲幅 < 3% 時，不發新訊號。
+    大盤濾網 v3 — 動態過濾（事前註冊 labs/V3_REGIME_PREREG_2026-11-14.md）：
+    閘門嚴格程度隨大盤狀態動態調整，只用訊號日收盤已知資料，不得前視。
+    d = bench_close / bench_ma20 - 1（0050 收盤與 MA20 的距離）
+    m = bench_ma20 / bench_ma20_prev5 - 1（MA20 的 5 日斜率）
+    - 強勢回檔（m > 0 且 -0.05 <= d < -0.012）：全放行。MA20 仍上行時，
+      跌破月線屬於上升趨勢中的回檔，當日正是 S1 破底翻／S0 收斂的進場日，
+      程式版原規則會擋掉弱勢股（s < 3%），此處放開。
+    - 弱勢確認（m < 0 且 d <= -0.03）：加嚴，只放行 20 日漲幅 >= 8% 的強勢股。
+      程式版原規則在確認空頭時仍放行 s >= 3% 的個股，此處收緊。
+    - 其餘：沿用程式版原規則——0050 跌破月線 1.2% 以上且個股 20 日漲幅 < 3% 時擋。
+    bench_ma20_prev5 未提供（None／NaN／<=0）時 m 視為 0，回到程式版原規則；
+    舊呼叫端（screener、futures_brk20_mapper、舊測試）行為不變。
     """
     if bench_ma20 is None or pd.isna(bench_ma20) or bench_ma20 <= 0:
         return True  # 無大盤資料時不擋，但呼叫端應記錄
+    # d、m 四捨五入到小數 6 位，使文件邊界（-0.05／-0.03／-0.012）行為與字面一致，
+    # 不受二進位浮點誤差影響（例如 95/100-1 在浮點下為 -0.050000000000000044）。
+    d = round(bench_close / bench_ma20 - 1.0, 6)
+    m = 0.0
+    if bench_ma20_prev5 is not None and not pd.isna(bench_ma20_prev5) and bench_ma20_prev5 > 0:
+        m = round(bench_ma20 / bench_ma20_prev5 - 1.0, 6)
+    if m > 0 and -0.05 <= d < -0.012:
+        return True  # 強勢回檔：全放行
+    if m < 0 and d <= -0.03:
+        return stock_ret_20d >= 0.08  # 弱勢確認：只放強勢股
+    # 其餘：程式版原規則——表示式維持原樣（bench_close < bench_ma20 * 0.988），
+    # 與舊版逐位元相同，確保無斜率輸入時行為一字不差。
     return not ((bench_close < bench_ma20 * 0.988) and (stock_ret_20d < 0.03))
 
 

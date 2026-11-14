@@ -53,12 +53,13 @@ def run_portfolio_backtest() -> dict:
     universe = build_dynamic_index_universe()
     sample_items = list(universe.items())[:220]
     tickers = ["0050.TW", "^TWII"] + [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
-    data = yf.download(tickers, start="2020-01-01", group_by="ticker", threads=True, progress=False)
+    data = yf.download(tickers, start="2016-01-01", group_by="ticker", threads=True, progress=False)
 
     bench_df = None
     if "0050.TW" in data.columns.get_level_values(0):
         bench_df = data["0050.TW"].dropna(subset=["Close"]).copy()
         bench_df["B_MA20"] = bench_df["Close"].rolling(20).mean()
+        bench_df["B_MA20_PREV5"] = bench_df["B_MA20"].shift(5)  # v3: MA20 的 5 日斜率輸入
         bench_df["B_RET20"] = bench_df["Close"].pct_change(20)
 
     twii_series = None
@@ -91,11 +92,12 @@ def run_portfolio_backtest() -> dict:
             if bench_df is None or dt_idx not in bench_df.index:
                 continue
             b_row = bench_df.loc[dt_idx]
-            if pd.isna(b_row["B_MA20"]) or pd.isna(b_row["B_RET20"]):
+            if pd.isna(b_row["B_MA20"]) or pd.isna(b_row["B_RET20"]) or pd.isna(b_row["B_MA20_PREV5"]):
                 continue
             cur_close = float(df["Close"].iloc[i])
             stock_ret20 = (cur_close - float(df["Close"].iloc[i - 20])) / float(df["Close"].iloc[i - 20])
-            m_ok = market_regime_ok(float(b_row["Close"]), float(b_row["B_MA20"]), stock_ret20)
+            m_ok = market_regime_ok(float(b_row["Close"]), float(b_row["B_MA20"]), stock_ret20,
+                                float(b_row["B_MA20_PREV5"]))  # v3: 傳入 MA20 5 日前值
             bench_ret20 = float(b_row["B_RET20"])
 
             # 與實盤同一函數; 切片只到訊號日, 無未來資料
