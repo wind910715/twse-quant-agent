@@ -38,6 +38,69 @@ MAX_CONCURRENT = CONFIG["MAX_CONCURRENT_POSITIONS"]
 SLOT_WEIGHT = 1.0 / MAX_CONCURRENT  # 每筆占組合 20%
 
 
+# ---------------------------------------------------------------- V2b 槽位排序
+# 2026-11-14 預註冊 V2_SLOTS_PREREG_2026-11-14.md：唯一變因是 MAX_CONCURRENT=5
+# 槽位滿時、同一進場日多訊號同時觸發的分配順序。進出場、停損、sizing、大盤閘門、
+# universe、成本、期間全部不動。
+# RANK_MODE = "rs": 同進場日候選按「年+季 RS 複合」排序（凍結規則，見 rank_candidates）。
+# RANK_MODE = "universe": 按 universe 順序（僅本地驗證對照用；GitHub run 一律用 "rs"）。
+RANK_MODE = "universe"
+
+STRATEGY_PRIORITY = {name: k for k, name in enumerate(ALL_STRATEGIES)}
+
+
+def compute_rs_panels(close_m: pd.DataFrame):
+    """年+季 RS 百分位面板（R 家族口徑，與 TSM labs build_indicators 同定義）。
+    rs_year：O'Neil 加權四季報酬 (0.4*ret63 + 0.2*ret126 + 0.2*ret189 + 0.2*ret252)
+             的全宇宙截面百分位 ×99（1-99）；rs_quarter：63 日報酬的截面百分位 ×99。
+    ret{q} = close / close.shift(q) - 1，只用當日以前的收盤價；排名為當日截面排名，
+    不含未來資料，無前視。回傳 (rs_year, rs_quarter)，皆與 close_m 同 index/columns。
+    """
+    rets = {}
+    for q in (63, 126, 189, 252):
+        rets[q] = close_m / close_m.shift(q) - 1
+    rs_weighted = 0.4 * rets[63] + 0.2 * rets[126] + 0.2 * rets[189] + 0.2 * rets[252]
+    rs_year = rs_weighted.rank(axis=1, pct=True) * 99
+    rs_quarter = rets[63].rank(axis=1, pct=True) * 99
+    return rs_year, rs_quarter
+
+
+def rs_composite(rs_year, rs_quarter, signal_date, symbol) -> float:
+    """單檔單日 RS 複合分數（只用訊號日當下已知的資料）。
+    年+季皆有取平均；缺一取其一；皆缺取 50.0（中性，不懲罰新股／資料不足者）。
+    """
+    y = float("nan")
+    q = float("nan")
+    if not rs_year.empty and signal_date in rs_year.index and symbol in rs_year.columns:
+        y = float(rs_year.at[signal_date, symbol])
+    if not rs_quarter.empty and signal_date in rs_quarter.index and symbol in rs_quarter.columns:
+        q = float(rs_quarter.at[signal_date, symbol])
+    if pd.isna(y) and pd.isna(q):
+        return 50.0
+    if pd.isna(y):
+        return q
+    if pd.isna(q):
+        return y
+    return (y + q) / 2.0
+
+
+def rank_candidates(day_cands, rs_year, rs_quarter, mode):
+    """同進場日候選排序（凍結規則）。
+    mode="rs"：RS 複合高→低；同分→策略優先序 S0>S1>S2>S3>S4；再同分→代號升冪。
+    mode="universe"：按 universe 順序（u_idx 升冪；僅本地驗證對照用）。
+    回傳排序後的新 list（不改動輸入 list 本身）。
+    """
+    if mode == "universe":
+        return sorted(day_cands, key=lambda c: c["u_idx"])
+    scored = []
+    for c in day_cands:
+        comp = rs_composite(rs_year, rs_quarter, c["signal_date"], c["symbol"])
+        scored.append((c, comp))
+    scored.sort(key=lambda t: (-t[1], STRATEGY_PRIORITY.get(t[0]["sig"]["strategy"], 99),
+                               t[0]["stock_id"]))
+    return [c for c, _ in scored]
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -53,7 +116,7 @@ def run_portfolio_backtest() -> dict:
     universe = build_dynamic_index_universe()
     sample_items = list(universe.items())[:220]
     tickers = ["0050.TW", "^TWII"] + [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
-    data = yf.download(tickers, start="2020-01-01", group_by="ticker", threads=True, progress=False)
+    data = yf.download(tickers, start="2016-01-01", group_by="ticker", threads=True, progress=False)
 
     bench_df = None
     if "0050.TW" in data.columns.get_level_values(0):
@@ -74,7 +137,20 @@ def run_portfolio_backtest() -> dict:
     skipped_stock_busy = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
-    for sid, (sname, sfx) in sample_items:
+    # ---- V2b: RS 面板（年+季 RS 百分位，R 家族口徑；只用訊號日以前的收盤價，無前視）----
+    stock_syms = [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
+    try:
+        close_m = data.xs("Close", level=1, axis=1)
+        close_m = close_m[[c for c in stock_syms if c in close_m.columns]]
+    except Exception as e:
+        raise RuntimeError(f"V2b: 無法建立 RS 收盤價面板: {e}")
+    if close_m.empty:
+        raise RuntimeError("V2b: RS 收盤價面板為空")
+    rs_year, rs_quarter = compute_rs_panels(close_m)
+
+    # ---- V2b: 逐檔預備（與原版相同的過濾：資料齊全、長度 >= 110、指標一次算好）----
+    per_stock = {}
+    for u_idx, (sid, (sname, sfx)) in enumerate(sample_items):
         t_sym = f"{sid}{sfx}"
         if t_sym not in data.columns.get_level_values(0):
             continue
@@ -82,10 +158,16 @@ def run_portfolio_backtest() -> dict:
         if len(df_raw) < 110:
             continue
         df = prepare_indicators(df_raw)
+        per_stock[sid] = {"u_idx": u_idx, "sname": sname, "sfx": sfx,
+                          "df_raw": df_raw, "df": df}
 
+    # ---- V2b: 收集階段（只做訊號評估＋隔日進場確認；槽位／忙碌判定留待排序後依序判定）----
+    cands_by_entry = {}
+    for sid, st in per_stock.items():
+        df_raw = st["df_raw"]
+        df = st["df"]
         start_idx = 60
         end_idx = len(df) - 2  # 至少要有隔日 K 做進場確認
-
         for i in range(start_idx, end_idx):
             dt_idx = df.index[i]
             if bench_df is None or dt_idx not in bench_df.index:
@@ -97,9 +179,8 @@ def run_portfolio_backtest() -> dict:
             stock_ret20 = (cur_close - float(df["Close"].iloc[i - 20])) / float(df["Close"].iloc[i - 20])
             m_ok = market_regime_ok(float(b_row["Close"]), float(b_row["B_MA20"]), stock_ret20)
             bench_ret20 = float(b_row["B_RET20"])
-
             # 與實盤同一函數; 切片只到訊號日, 無未來資料
-            sigs = evaluate_candidate(df_raw.iloc[:i + 1], sid, sname, sfx,
+            sigs = evaluate_candidate(df_raw.iloc[:i + 1], sid, st["sname"], st["sfx"],
                                       chip_info=None, bench_ret_20d=bench_ret20,
                                       market_ok=m_ok, require_chip=False, bench_series=twii_series)
             if not sigs:
@@ -107,8 +188,7 @@ def run_portfolio_backtest() -> dict:
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
             signal_close = sig["entry_price"]
             stop_p = sig["hard_stop"]
-
-            # 隔日進場確認 (與 v1 相同規則, 保留)
+            # 隔日進場確認 (與原版相同規則, 保留)
             next_bar = df.iloc[i + 1]
             n_open = float(next_bar["Open"])
             n_high = float(next_bar["High"])
@@ -118,9 +198,24 @@ def run_portfolio_backtest() -> dict:
             trigger_buy = round(max(signal_close, n_open * 1.003), 2)
             if n_high < trigger_buy or n_close < n_open * 0.998:
                 continue
-
             entry_date = df.index[i + 1]
-            # 組合約束: 同股未出場不重進; 同時持倉未滿才進
+            cands_by_entry.setdefault(entry_date, []).append({
+                "stock_id": sid, "symbol": f"{sid}{st['sfx']}", "u_idx": st["u_idx"],
+                "sigs": sigs, "sig": sig, "signal_date": dt_idx,
+                "entry_date": entry_date, "entry_idx": i + 1,
+                "trigger_buy": trigger_buy, "stop_p": stop_p,
+                "n_open": n_open, "n_high": n_high, "n_close": n_close,
+                "df": df,
+            })
+
+    # ---- V2b: 分配階段（按進場日升序；同日候選按凍結規則排序後依序填槽）----
+    for entry_date in sorted(cands_by_entry.keys()):
+        day_cands = rank_candidates(cands_by_entry[entry_date], rs_year, rs_quarter, RANK_MODE)
+        for cand in day_cands:
+            sid = cand["stock_id"]
+            sig = cand["sig"]
+            df = cand["df"]
+            # 組合約束: 同股未出場不重進; 同時持倉未滿才進（與原版相同）
             overlapping = [p for p in open_positions if p["entry_date"] <= entry_date < p["exit_date"]]
             if any(p["stock_id"] == sid for p in overlapping):
                 skipped_stock_busy += 1
@@ -128,8 +223,7 @@ def run_portfolio_backtest() -> dict:
             if len(overlapping) >= MAX_CONCURRENT:
                 skipped_portfolio_full += 1
                 continue
-
-            result = simulate_exit(df, i + 1, trigger_buy, stop_p)
+            result = simulate_exit(df, cand["entry_idx"], cand["trigger_buy"], cand["stop_p"])
             if result["censored"]:
                 censored_count += 1
                 continue
@@ -145,16 +239,15 @@ def run_portfolio_backtest() -> dict:
                 "chip_unverified": True,
             })
             open_positions.append({"stock_id": sid, "entry_date": entry_date, "exit_date": exit_date})
-
-            # v3 shadow: 次要策略僅統計, 用同一套隔日進場確認與出場模擬
-            for extra in sigs[1:]:
+            # v3 shadow: 次要策略僅統計, 用同一套隔日進場確認與出場模擬（只對已進場的 primary）
+            for extra in cand["sigs"][1:]:
                 e_stop = extra["hard_stop"]
-                if n_open > extra["entry_price"] * 1.028 or n_open <= e_stop:
+                if cand["n_open"] > extra["entry_price"] * 1.028 or cand["n_open"] <= e_stop:
                     continue
-                e_trigger = round(max(extra["entry_price"], n_open * 1.003), 2)
-                if n_high < e_trigger or n_close < n_open * 0.998:
+                e_trigger = round(max(extra["entry_price"], cand["n_open"] * 1.003), 2)
+                if cand["n_high"] < e_trigger or cand["n_close"] < cand["n_open"] * 0.998:
                     continue
-                e_res = simulate_exit(df, i + 1, e_trigger, e_stop)
+                e_res = simulate_exit(df, cand["entry_idx"], e_trigger, e_stop)
                 if e_res["censored"]:
                     continue
                 shadow_trades.append({
