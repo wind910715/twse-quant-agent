@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: 1. 檢出倉庫程式碼與快取狀態
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 2. 安裝 Python 3.11 與量化套件
         uses: actions/setup-python@v5
