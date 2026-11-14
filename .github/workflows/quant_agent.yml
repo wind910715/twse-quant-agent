@@ -138,6 +138,6 @@ jobs:
           git add latest_report.json active_positions.json latest_backtest.json universe_cache.json trade_events.jsonl
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
-            git pull --rebase origin main
+            git pull --rebase --autostash origin main
             git push origin HEAD
           fi
