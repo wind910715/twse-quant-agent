@@ -74,7 +74,15 @@ def run_portfolio_backtest() -> dict:
     skipped_stock_busy = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
-    for sid, (sname, sfx) in sample_items:
+    # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
+    # 原版逐檔外圈迴圈的漏洞：處理某檔時，尚未處理到的其他檔、進場日較早的部位
+    # 不在 open_positions 內，overlap 判定少算，組合可超持 MAX_CONCURRENT。
+    # 修法：先逐檔收集全部候選（訊號評估＋隔日進場確認），再按進場日升序、
+    # 同日按 universe 順序依序分配。進出場、停損、sizing、大盤閘門、universe、
+    # 成本、期間全部不動。不含 RS 排序（V2b 歸因：排序無功，此路不追）；
+    # 起算日維持 2020（live 口徑，不改 V 系列 2016 測試口徑）。
+    per_stock = {}
+    for u_idx, (sid, (sname, sfx)) in enumerate(sample_items):
         t_sym = f"{sid}{sfx}"
         if t_sym not in data.columns.get_level_values(0):
             continue
@@ -82,7 +90,14 @@ def run_portfolio_backtest() -> dict:
         if len(df_raw) < 110:
             continue
         df = prepare_indicators(df_raw)
+        per_stock[sid] = {"u_idx": u_idx, "sname": sname, "sfx": sfx,
+                          "df_raw": df_raw, "df": df}
 
+    # 收集階段：只做訊號評估＋隔日進場確認；槽位／忙碌判定留待分配階段依序判定
+    cands_by_entry = {}
+    for sid, st in per_stock.items():
+        df_raw = st["df_raw"]
+        df = st["df"]
         start_idx = 60
         end_idx = len(df) - 2  # 至少要有隔日 K 做進場確認
 
@@ -99,7 +114,7 @@ def run_portfolio_backtest() -> dict:
             bench_ret20 = float(b_row["B_RET20"])
 
             # 與實盤同一函數; 切片只到訊號日, 無未來資料
-            sigs = evaluate_candidate(df_raw.iloc[:i + 1], sid, sname, sfx,
+            sigs = evaluate_candidate(df_raw.iloc[:i + 1], sid, st["sname"], st["sfx"],
                                       chip_info=None, bench_ret_20d=bench_ret20,
                                       market_ok=m_ok, require_chip=False, bench_series=twii_series)
             if not sigs:
@@ -108,7 +123,7 @@ def run_portfolio_backtest() -> dict:
             signal_close = sig["entry_price"]
             stop_p = sig["hard_stop"]
 
-            # 隔日進場確認 (與 v1 相同規則, 保留)
+            # 隔日進場確認 (與原版相同規則, 保留)
             next_bar = df.iloc[i + 1]
             n_open = float(next_bar["Open"])
             n_high = float(next_bar["High"])
@@ -120,7 +135,23 @@ def run_portfolio_backtest() -> dict:
                 continue
 
             entry_date = df.index[i + 1]
-            # 組合約束: 同股未出場不重進; 同時持倉未滿才進
+            cands_by_entry.setdefault(entry_date, []).append({
+                "stock_id": sid, "u_idx": st["u_idx"],
+                "sigs": sigs, "sig": sig, "signal_date": dt_idx,
+                "entry_date": entry_date, "entry_idx": i + 1,
+                "trigger_buy": trigger_buy, "stop_p": stop_p,
+                "n_open": n_open, "n_high": n_high, "n_close": n_close,
+                "df": df,
+            })
+
+    # 分配階段：按進場日升序；同日候選按 universe 順序依序填槽
+    for entry_date in sorted(cands_by_entry.keys()):
+        day_cands = sorted(cands_by_entry[entry_date], key=lambda c: c["u_idx"])
+        for cand in day_cands:
+            sid = cand["stock_id"]
+            sig = cand["sig"]
+            df = cand["df"]
+            # 組合約束: 同股未出場不重進; 同時持倉未滿才進（與原版相同）
             overlapping = [p for p in open_positions if p["entry_date"] <= entry_date < p["exit_date"]]
             if any(p["stock_id"] == sid for p in overlapping):
                 skipped_stock_busy += 1
@@ -129,7 +160,7 @@ def run_portfolio_backtest() -> dict:
                 skipped_portfolio_full += 1
                 continue
 
-            result = simulate_exit(df, i + 1, trigger_buy, stop_p)
+            result = simulate_exit(df, cand["entry_idx"], cand["trigger_buy"], cand["stop_p"])
             if result["censored"]:
                 censored_count += 1
                 continue
@@ -146,15 +177,15 @@ def run_portfolio_backtest() -> dict:
             })
             open_positions.append({"stock_id": sid, "entry_date": entry_date, "exit_date": exit_date})
 
-            # v3 shadow: 次要策略僅統計, 用同一套隔日進場確認與出場模擬
-            for extra in sigs[1:]:
+            # v3 shadow: 次要策略僅統計, 用同一套隔日進場確認與出場模擬（只對已進場的 primary）
+            for extra in cand["sigs"][1:]:
                 e_stop = extra["hard_stop"]
-                if n_open > extra["entry_price"] * 1.028 or n_open <= e_stop:
+                if cand["n_open"] > extra["entry_price"] * 1.028 or cand["n_open"] <= e_stop:
                     continue
-                e_trigger = round(max(extra["entry_price"], n_open * 1.003), 2)
-                if n_high < e_trigger or n_close < n_open * 0.998:
+                e_trigger = round(max(extra["entry_price"], cand["n_open"] * 1.003), 2)
+                if cand["n_high"] < e_trigger or cand["n_close"] < cand["n_open"] * 0.998:
                     continue
-                e_res = simulate_exit(df, i + 1, e_trigger, e_stop)
+                e_res = simulate_exit(df, cand["entry_idx"], e_trigger, e_stop)
                 if e_res["censored"]:
                     continue
                 shadow_trades.append({
