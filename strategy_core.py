@@ -414,27 +414,10 @@ def evaluate_candidate(df_raw: pd.DataFrame, sid: str, sname: str, sfx: str,
         stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
         matched.append(("S2_量增突破", entry, stop))
 
-    # S3_起漲股 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
-    # 今日最高價 = 100 日最高價（含今日）且上一次同條件距今日 > 100 根（無前次則為首現）。
-    # 僅受 market_ok、基本有效性（MV20/價格）與法人閘門約束（與 S2 相同；
-    # 重測口徑為 XQ 訊號 + 主系統閘門，不另設 XQ 大盤濾網/5 日均量門檻）。
-    # 停損 = S2 式 max(訊號日低點 x0.995, 進場 x0.975)（重測假設，凍結為實盤停損）。
-    # 間隔計算必須與夜班 loop_turtle 完全一致：只計位置 >= 100 的前次同條件日
-    # （loop_turtle 從 i=100 起算，100 根之前的同條件日不計入間隔，否則會誤殺首現訊號）。
-    if len(df) >= 101:
-        high_roll_max = df["High"].rolling(100).max()
-        is_100_high = (df["High"] == high_roll_max)
-        if bool(is_100_high.iloc[-1]):
-            prior = is_100_high.iloc[100:-1]
-            if not prior.any():
-                c21_hit = True
-            else:
-                prior_idx = 100 + int(np.where(prior.values)[0][-1])
-                c21_hit = ((len(df) - 1 - prior_idx) > 100)
-            if c21_hit:
-                entry = round(float(cur["Close"]), 2)
-                stop = round(float(max(cur["Low"] * 0.995, entry * 0.975)), 2)
-                matched.append(("S3_起漲股", entry, stop))
+    # V2a (2026-11-14, 預註冊 V2_SLOTS_PREREG_2026-11-14.md)：S3_起漲股整段停發。
+    # 原 S3 區塊（100 日新高＋間隔 >100 根）已整段移除，僅此一處變動；
+    # S0/S1/S2/S4、停損、sizing、出場、大盤閘門、法人閘門全部不動。
+    # 移除後同日同股若僅有 S3 訊號，evaluate_candidate 回傳 []（不發訊號）。
 
     # S4_強於大盤 (v3.7 併入，XQ 夜班通過者，主系統引擎重測過關）：
     # value1 = 個股收盤 / 加權收盤；up = value1 之 20 日布林上限（均值 + 2x 標準差，ddof=0）；
