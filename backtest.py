@@ -37,6 +37,75 @@ REPORT_STRATEGIES = ALL_STRATEGIES
 MAX_CONCURRENT = CONFIG["MAX_CONCURRENT_POSITIONS"]
 SLOT_WEIGHT = 1.0 / MAX_CONCURRENT  # 每筆占組合 20%
 
+# ---------------------------------------------------------------- V4 分策略 RS 掛載
+# 2026-11-14 預註冊 V4_RS_MOUNT_PREREG_2026-11-14.md：唯一變因是 evaluate_candidate
+# 回傳的訊號是否掛上「複合 RS >= 80」濾網，掛載表見 RS_MOUNT（A／B 各一表）。
+# 進出場、停損、sizing、大盤閘門、universe、成本、期間、槽位邏輯全部不動。
+# compute_rs_panels／rs_composite 逐字複製 V2b 已驗證版本（V2b 本地驗證 B1：
+# 面板與手算一致、無前視）；若 live 已含 V2b 的 helpers，派發時 rebase 改為共用。
+# RS_MOUNT_THRESHOLD = 80.0（與 R3／A3 同定義：年＋季複合 >= 80）。
+RS_MOUNT_THRESHOLD = 80.0
+
+# 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
+RS_MOUNT = {
+    "S0_VCP收斂": True,
+    "S1_破底翻": False,
+    "S2_量增突破": True,
+    "S3_起漲股": True,
+    "S4_強於大盤": True,
+}
+
+
+def compute_rs_panels(close_m: pd.DataFrame):
+    """年+季 RS 百分位面板（R 家族口徑，與 TSM labs build_indicators 同定義）。
+    rs_year：O'Neil 加權四季報酬 (0.4*ret63 + 0.2*ret126 + 0.2*ret189 + 0.2*ret252)
+             的全宇宙截面百分位 ×99（1-99）；rs_quarter：63 日報酬的截面百分位 ×99。
+    ret{q} = close / close.shift(q) - 1，只用當日以前的收盤價；排名為當日截面排名，
+    不含未來資料，無前視。回傳 (rs_year, rs_quarter)，皆與 close_m 同 index/columns。
+    """
+    rets = {}
+    for q in (63, 126, 189, 252):
+        rets[q] = close_m / close_m.shift(q) - 1
+    rs_weighted = 0.4 * rets[63] + 0.2 * rets[126] + 0.2 * rets[189] + 0.2 * rets[252]
+    rs_year = rs_weighted.rank(axis=1, pct=True) * 99
+    rs_quarter = rets[63].rank(axis=1, pct=True) * 99
+    return rs_year, rs_quarter
+
+
+def rs_composite(rs_year, rs_quarter, signal_date, symbol) -> float:
+    """單檔單日 RS 複合分數（只用訊號日當下已知的資料）。
+    年+季皆有取平均；缺一取其一；皆缺取 50.0（中性，排名用；掛載時 50.0 < 80 會被擋下）。
+    """
+    y = float("nan")
+    q = float("nan")
+    if not rs_year.empty and signal_date in rs_year.index and symbol in rs_year.columns:
+        y = float(rs_year.at[signal_date, symbol])
+    if not rs_quarter.empty and signal_date in rs_quarter.index and symbol in rs_quarter.columns:
+        q = float(rs_quarter.at[signal_date, symbol])
+    if pd.isna(y) and pd.isna(q):
+        return 50.0
+    if pd.isna(y):
+        return q
+    if pd.isna(q):
+        return y
+    return (y + q) / 2.0
+
+
+def apply_rs_mount(sigs, rs_year, rs_quarter, signal_date, symbol):
+    """分策略 RS 掛載（凍結規則）。
+    RS_MOUNT 表中標 True 的策略，其訊號須複合 RS >= RS_MOUNT_THRESHOLD 才保留；
+    未掛載策略原樣保留。回傳過濾後的新 list（不改動輸入 list 本身）。
+    """
+    kept = []
+    for s in sigs:
+        if not RS_MOUNT.get(s["strategy"], False):
+            kept.append(s)
+            continue
+        if rs_composite(rs_year, rs_quarter, signal_date, symbol) >= RS_MOUNT_THRESHOLD:
+            kept.append(s)
+    return kept
+
+
 
 def summarize_rows(rows: list) -> dict:
     if not rows:
@@ -53,7 +122,7 @@ def run_portfolio_backtest() -> dict:
     universe = build_dynamic_index_universe()
     sample_items = list(universe.items())[:220]
     tickers = ["0050.TW", "^TWII"] + [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
-    data = yf.download(tickers, start="2020-01-01", group_by="ticker", threads=True, progress=False)
+    data = yf.download(tickers, start="2016-01-01", group_by="ticker", threads=True, progress=False)
 
     bench_df = None
     if "0050.TW" in data.columns.get_level_values(0):
@@ -67,11 +136,23 @@ def run_portfolio_backtest() -> dict:
         if twii_series.empty:
             twii_series = None
 
+    # ---- V4: RS 面板（年+季 RS 百分位，R 家族口徑；只用訊號日以前的收盤價，無前視）----
+    stock_syms = [f"{sid}{sfx}" for sid, (_, sfx) in sample_items]
+    try:
+        close_m = data.xs("Close", level=1, axis=1)
+        close_m = close_m[[c for c in stock_syms if c in close_m.columns]]
+    except Exception as e:
+        raise RuntimeError(f"V4: 無法建立 RS 收盤價面板: {e}")
+    if close_m.empty:
+        raise RuntimeError("V4: RS 收盤價面板為空")
+    rs_year, rs_quarter = compute_rs_panels(close_m)
+
     trades = []
     shadow_trades = []  # v3: 同日同股的次要策略訊號也做影子模擬統計 (不占組合資金), 避免次要訊號被優先序吞掉而看不見表現
     censored_count = 0
     skipped_portfolio_full = 0
     skipped_stock_busy = 0
+    skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     for sid, (sname, sfx) in sample_items:
@@ -102,6 +183,10 @@ def run_portfolio_backtest() -> dict:
             sigs = evaluate_candidate(df_raw.iloc[:i + 1], sid, sname, sfx,
                                       chip_info=None, bench_ret_20d=bench_ret20,
                                       market_ok=m_ok, require_chip=False, bench_series=twii_series)
+            # ---- V4: 分策略 RS 掛載（凍結掛載表，見 RS_MOUNT）----
+            n_sigs = len(sigs)
+            sigs = apply_rs_mount(sigs, rs_year, rs_quarter, dt_idx, t_sym)
+            skipped_rs_mount += n_sigs - len(sigs)
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -173,6 +258,7 @@ def run_portfolio_backtest() -> dict:
             "censored_trades_excluded": censored_count,
             "skipped_portfolio_full": skipped_portfolio_full,
             "skipped_stock_busy": skipped_stock_busy,
+            "skipped_rs_mount": skipped_rs_mount,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -220,6 +306,7 @@ def run_portfolio_backtest() -> dict:
         "censored_trades_excluded": censored_count,
         "skipped_portfolio_full": skipped_portfolio_full,
         "skipped_stock_busy": skipped_stock_busy,
+            "skipped_rs_mount": skipped_rs_mount,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
