@@ -45,6 +45,9 @@ SLOT_WEIGHT = 1.0 / MAX_CONCURRENT  # 每筆占組合 20%
 # 面板與手算一致、無前視）；若 live 已含 V2b 的 helpers，派發時 rebase 改為共用。
 # RS_MOUNT_THRESHOLD = 80.0（與 R3／A3 同定義：年＋季複合 >= 80）。
 RS_MOUNT_THRESHOLD = 80.0
+S2_VOL_MULT = 2.5
+S2_OPEN_GAP_LO = -0.01
+S2_OPEN_GAP_HI = 0.05
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -106,6 +109,29 @@ def apply_rs_mount(sigs, rs_year, rs_quarter, signal_date, symbol):
     return kept
 
 
+def apply_s2_vol_filter(sigs, df_raw, i):
+    """V5b 條件 A：S2_量增突破 訊號日 T 量能須嚴格大於含 T 日 5 日均量的 2.5 倍。
+    僅處理 S2_量增突破，其他策略原樣保留；上市交易日不足 5 日（i < 4）視為不滿足。
+    回傳 (kept, s2_vol_skipped)。
+    """
+    kept = []
+    s2_vol_skipped = 0
+    for s in sigs:
+        if s["strategy"] != "S2_量增突破":
+            kept.append(s)
+            continue
+        if i < 4:
+            s2_vol_skipped += 1
+            continue
+        vol_t = float(df_raw["Volume"].iloc[i])
+        ma5 = float(df_raw["Volume"].iloc[i - 4:i + 1].mean())
+        if vol_t > S2_VOL_MULT * ma5:
+            kept.append(s)
+        else:
+            s2_vol_skipped += 1
+    return kept, s2_vol_skipped
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -152,6 +178,8 @@ def run_portfolio_backtest() -> dict:
     skipped_portfolio_full = 0
     skipped_stock_busy = 0
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
+    skipped_s2_vol = 0
+    skipped_s2_open = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -202,6 +230,8 @@ def run_portfolio_backtest() -> dict:
             n_sigs = len(sigs)
             sigs = apply_rs_mount(sigs, rs_year, rs_quarter, dt_idx, t_sym)
             skipped_rs_mount += n_sigs - len(sigs)
+            sigs, s2_vol_skipped = apply_s2_vol_filter(sigs, df_raw, i)
+            skipped_s2_vol += s2_vol_skipped
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -215,6 +245,11 @@ def run_portfolio_backtest() -> dict:
             n_close = float(next_bar["Close"])
             if n_open > signal_close * 1.028 or n_open <= stop_p:
                 continue
+            if sig["strategy"] == "S2_量增突破":
+                gap = n_open / signal_close - 1
+                if gap < S2_OPEN_GAP_LO or gap > S2_OPEN_GAP_HI:
+                    skipped_s2_open += 1
+                    continue
             trigger_buy = round(max(signal_close, n_open * 1.003), 2)
             if n_high < trigger_buy or n_close < n_open * 0.998:
                 continue
@@ -267,6 +302,10 @@ def run_portfolio_backtest() -> dict:
                 e_stop = extra["hard_stop"]
                 if cand["n_open"] > extra["entry_price"] * 1.028 or cand["n_open"] <= e_stop:
                     continue
+                if extra["strategy"] == "S2_量增突破":
+                    e_gap = cand["n_open"] / extra["entry_price"] - 1
+                    if e_gap < S2_OPEN_GAP_LO or e_gap > S2_OPEN_GAP_HI:
+                        continue
                 e_trigger = round(max(extra["entry_price"], cand["n_open"] * 1.003), 2)
                 if cand["n_high"] < e_trigger or cand["n_close"] < cand["n_open"] * 0.998:
                     continue
@@ -290,6 +329,8 @@ def run_portfolio_backtest() -> dict:
             "skipped_portfolio_full": skipped_portfolio_full,
             "skipped_stock_busy": skipped_stock_busy,
             "skipped_rs_mount": skipped_rs_mount,
+            "skipped_s2_vol": skipped_s2_vol,
+            "skipped_s2_open": skipped_s2_open,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -338,6 +379,8 @@ def run_portfolio_backtest() -> dict:
         "skipped_portfolio_full": skipped_portfolio_full,
         "skipped_stock_busy": skipped_stock_busy,
         "skipped_rs_mount": skipped_rs_mount,
+        "skipped_s2_vol": skipped_s2_vol,
+        "skipped_s2_open": skipped_s2_open,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
