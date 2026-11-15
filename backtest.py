@@ -48,6 +48,8 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+ATR_PERIOD = 14
+ATR_CLOSE_MAX = 0.045
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -132,6 +134,36 @@ def apply_s2_vol_filter(sigs, df_raw, i):
     return kept, s2_vol_skipped
 
 
+def apply_atr_filter(sigs, df_raw, i):
+    """V5d：全策略訊號日 ATR(14) / Close <= 0.045 濾網（Wilder ATR 定義，只用 df_raw）。
+    歷史不足（i < ATR_PERIOD）視為不滿足；回傳 (kept, atr_skipped)。
+    """
+    if not sigs:
+        return [], 0
+    if i < ATR_PERIOD:
+        return [], len(sigs)
+    highs = df_raw["High"].iloc[:i + 1].to_numpy(dtype=float)
+    lows = df_raw["Low"].iloc[:i + 1].to_numpy(dtype=float)
+    closes = df_raw["Close"].iloc[:i + 1].to_numpy(dtype=float)
+    tr_sum = 0.0
+    for k in range(1, ATR_PERIOD + 1):
+        h_k = highs[k]
+        l_k = lows[k]
+        c_prev = closes[k - 1]
+        tr_sum += max(h_k - l_k, abs(h_k - c_prev), abs(l_k - c_prev))
+    atr = tr_sum / ATR_PERIOD
+    for k in range(ATR_PERIOD + 1, i + 1):
+        h_k = highs[k]
+        l_k = lows[k]
+        c_prev = closes[k - 1]
+        tr_k = max(h_k - l_k, abs(h_k - c_prev), abs(l_k - c_prev))
+        atr = (atr * (ATR_PERIOD - 1) + tr_k) / ATR_PERIOD
+    close = float(df_raw["Close"].iloc[i])
+    if close > 0 and atr / close <= ATR_CLOSE_MAX:
+        return list(sigs), 0
+    return [], len(sigs)
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -180,6 +212,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_atr = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -232,6 +265,8 @@ def run_portfolio_backtest() -> dict:
             skipped_rs_mount += n_sigs - len(sigs)
             sigs, s2_vol_skipped = apply_s2_vol_filter(sigs, df_raw, i)
             skipped_s2_vol += s2_vol_skipped
+            sigs, atr_skipped = apply_atr_filter(sigs, df_raw, i)
+            skipped_atr += atr_skipped
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -331,6 +366,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_atr": skipped_atr,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +417,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_atr": skipped_atr,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
