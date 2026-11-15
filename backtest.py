@@ -48,6 +48,9 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+S1_VOL_MULT = 2.0
+S1_VOL_MA_WINDOW = 20
+S1_OPEN_MIN = 1.00
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -132,6 +135,29 @@ def apply_s2_vol_filter(sigs, df_raw, i):
     return kept, s2_vol_skipped
 
 
+def apply_s1_confirm_filter(sigs, df_raw, i):
+    """V6b 條件 A：S1_破底翻 訊號日 T 量能須 <= 含 T 日 20 日均量的 2.0 倍。
+    僅處理 S1_破底翻，其他策略原樣保留；上市交易日不足 20 日（i < 19）視為不滿足。
+    回傳 (kept, s1_skipped)。
+    """
+    kept = []
+    s1_skipped = 0
+    for s in sigs:
+        if s["strategy"] != "S1_破底翻":
+            kept.append(s)
+            continue
+        if i < S1_VOL_MA_WINDOW - 1:
+            s1_skipped += 1
+            continue
+        vol_t = float(df_raw["Volume"].iloc[i])
+        ma20 = float(df_raw["Volume"].iloc[i - (S1_VOL_MA_WINDOW - 1):i + 1].mean())
+        if vol_t > S1_VOL_MULT * ma20:
+            s1_skipped += 1
+        else:
+            kept.append(s)
+    return kept, s1_skipped
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -180,6 +206,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_s1_confirm = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -232,6 +259,8 @@ def run_portfolio_backtest() -> dict:
             skipped_rs_mount += n_sigs - len(sigs)
             sigs, s2_vol_skipped = apply_s2_vol_filter(sigs, df_raw, i)
             skipped_s2_vol += s2_vol_skipped
+            sigs, s1_vol_skipped = apply_s1_confirm_filter(sigs, df_raw, i)
+            skipped_s1_confirm += s1_vol_skipped
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -249,6 +278,10 @@ def run_portfolio_backtest() -> dict:
                 gap = n_open / signal_close - 1
                 if gap < S2_OPEN_GAP_LO or gap > S2_OPEN_GAP_HI:
                     skipped_s2_open += 1
+                    continue
+            if sig["strategy"] == "S1_破底翻":
+                if n_open < signal_close * S1_OPEN_MIN:
+                    skipped_s1_confirm += 1
                     continue
             trigger_buy = round(max(signal_close, n_open * 1.003), 2)
             if n_high < trigger_buy or n_close < n_open * 0.998:
@@ -306,6 +339,9 @@ def run_portfolio_backtest() -> dict:
                     e_gap = cand["n_open"] / extra["entry_price"] - 1
                     if e_gap < S2_OPEN_GAP_LO or e_gap > S2_OPEN_GAP_HI:
                         continue
+                if extra["strategy"] == "S1_破底翻":
+                    if cand["n_open"] < extra["entry_price"] * S1_OPEN_MIN:
+                        continue
                 e_trigger = round(max(extra["entry_price"], cand["n_open"] * 1.003), 2)
                 if cand["n_high"] < e_trigger or cand["n_close"] < cand["n_open"] * 0.998:
                     continue
@@ -331,6 +367,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_s1_confirm": skipped_s1_confirm,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +418,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_s1_confirm": skipped_s1_confirm,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
