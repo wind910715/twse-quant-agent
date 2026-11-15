@@ -48,6 +48,9 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+CRASH_WINDOW = 60
+CRASH_RET = -0.02
+CRASH_MIN = 6
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -132,6 +135,17 @@ def apply_s2_vol_filter(sigs, df_raw, i):
     return kept, s2_vol_skipped
 
 
+def count_crash_days(close_m, sym_i, sym_j, sig_date):
+    """回傳 i、j 在訊號日 t 前 60 個交易日內同時重挫（日報酬皆 <= -2%）的天數。
+    取截至 t 的最後 61 根收盤價算 60 個日報酬；i、j 共同有效報酬日 < 60 則回傳 0。"""
+    win_i = close_m[sym_i].loc[:sig_date].tail(CRASH_WINDOW + 1)
+    win_j = close_m[sym_j].loc[:sig_date].tail(CRASH_WINDOW + 1)
+    both = pd.concat([win_i.pct_change(), win_j.pct_change()], axis=1).dropna()
+    if len(both) < CRASH_WINDOW:
+        return 0
+    return int(((both.iloc[:, 0] <= CRASH_RET) & (both.iloc[:, 1] <= CRASH_RET)).sum())
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -180,6 +194,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_crash = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -279,6 +294,18 @@ def run_portfolio_backtest() -> dict:
             if len(overlapping) >= MAX_CONCURRENT:
                 skipped_portfolio_full += 1
                 continue
+            if overlapping:
+                sym_i = f"{sid}{per_stock[sid]['sfx']}"
+                crash_blocked = False
+                for p in overlapping:
+                    jsid = p["stock_id"]
+                    sym_j = f"{jsid}{per_stock[jsid]['sfx']}"
+                    if count_crash_days(close_m, sym_i, sym_j, cand["signal_date"]) >= CRASH_MIN:
+                        crash_blocked = True
+                        break
+                if crash_blocked:
+                    skipped_crash += 1
+                    continue
 
             result = simulate_exit(df, cand["entry_idx"], cand["trigger_buy"], cand["stop_p"])
             if result["censored"]:
@@ -331,6 +358,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_crash": skipped_crash,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +409,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_crash": skipped_crash,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
