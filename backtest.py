@@ -48,6 +48,8 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+CORR_MAX = 0.70
+CORR_WINDOW = 20
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -132,6 +134,22 @@ def apply_s2_vol_filter(sigs, df_raw, i):
     return kept, s2_vol_skipped
 
 
+def corr_too_high(ret_m: pd.DataFrame, sym_a: str, sym_b: str, signal_date) -> bool:
+    """V5f：檢查 sym_a 與 sym_b 截至 signal_date 的過去 CORR_WINDOW 個交易日日報酬率
+    Pearson 相關係數是否嚴格大於 CORR_MAX。視窗不足或含 NaN 時回傳 False（放行）。
+    """
+    if sym_a not in ret_m.columns or sym_b not in ret_m.columns:
+        return False
+    window = ret_m.loc[:signal_date].tail(CORR_WINDOW)
+    if len(window) < CORR_WINDOW:
+        return False
+    a = window[sym_a]
+    b = window[sym_b]
+    if a.isna().any() or b.isna().any():
+        return False
+    return float(a.corr(b)) > CORR_MAX
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -171,6 +189,7 @@ def run_portfolio_backtest() -> dict:
     if close_m.empty:
         raise RuntimeError("V4: RS 收盤價面板為空")
     rs_year, rs_quarter = compute_rs_panels(close_m)
+    ret_m = close_m.pct_change()
 
     trades = []
     shadow_trades = []  # v3: 同日同股的次要策略訊號也做影子模擬統計 (不占組合資金), 避免次要訊號被優先序吞掉而看不見表現
@@ -180,6 +199,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_corr = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -279,6 +299,16 @@ def run_portfolio_backtest() -> dict:
             if len(overlapping) >= MAX_CONCURRENT:
                 skipped_portfolio_full += 1
                 continue
+            cand_sym = f"{sid}{per_stock[sid]['sfx']}"
+            corr_blocked = False
+            for p in overlapping:
+                held_sym = f"{p['stock_id']}{per_stock[p['stock_id']]['sfx']}"
+                if corr_too_high(ret_m, cand_sym, held_sym, cand["signal_date"]):
+                    corr_blocked = True
+                    break
+            if corr_blocked:
+                skipped_corr += 1
+                continue
 
             result = simulate_exit(df, cand["entry_idx"], cand["trigger_buy"], cand["stop_p"])
             if result["censored"]:
@@ -331,6 +361,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_corr": skipped_corr,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +412,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_corr": skipped_corr,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
