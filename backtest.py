@@ -48,6 +48,8 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+S3_MA20_WINDOW = 20
+S3_CLOSE_MAX_GAP = 1.12
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -132,6 +134,30 @@ def apply_s2_vol_filter(sigs, df_raw, i):
     return kept, s2_vol_skipped
 
 
+def apply_s3_trend_filter(sigs, df_raw, i):
+    """V6d：S3_起漲股 須同時滿足月線非下彎（MA20_T >= MA20_{T-1}）且乖離 <= 12%。
+    僅處理 S3_起漲股，其他策略原樣保留；主迴圈 start_idx = 60 恆有 20 日窗口。
+    回傳 (kept, s3_trend_skipped)。
+    """
+    kept = []
+    s3_trend_skipped = 0
+    for s in sigs:
+        if s["strategy"] != "S3_起漲股":
+            kept.append(s)
+            continue
+        ma20_t = float(df_raw["Close"].iloc[i - S3_MA20_WINDOW + 1:i + 1].mean())
+        ma20_prev = float(df_raw["Close"].iloc[i - S3_MA20_WINDOW:i].mean())
+        if ma20_t < ma20_prev:
+            s3_trend_skipped += 1
+            continue
+        close_t = float(df_raw["Close"].iloc[i])
+        if close_t > ma20_t * S3_CLOSE_MAX_GAP:
+            s3_trend_skipped += 1
+            continue
+        kept.append(s)
+    return kept, s3_trend_skipped
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -180,6 +206,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_s3_trend = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -232,6 +259,8 @@ def run_portfolio_backtest() -> dict:
             skipped_rs_mount += n_sigs - len(sigs)
             sigs, s2_vol_skipped = apply_s2_vol_filter(sigs, df_raw, i)
             skipped_s2_vol += s2_vol_skipped
+            sigs, s3_trend_skipped = apply_s3_trend_filter(sigs, df_raw, i)
+            skipped_s3_trend += s3_trend_skipped
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -331,6 +360,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_s3_trend": skipped_s3_trend,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +411,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_s3_trend": skipped_s3_trend,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
