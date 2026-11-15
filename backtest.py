@@ -48,6 +48,7 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+CLOSE_STRENGTH_MIN = 0.70
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -132,6 +133,32 @@ def apply_s2_vol_filter(sigs, df_raw, i):
     return kept, s2_vol_skipped
 
 
+def apply_close_strength_filter(sigs, df_raw, i):
+    """V5c：S2／S3／S4 訊號日收盤強度須 >= 0.70；當日零振幅（High == Low）視為不滿足。
+    僅處理 S2_量增突破、S3_起漲股、S4_強於大盤，其他策略原樣保留。
+    回傳 (kept, skipped_count)。
+    """
+    target_strats = {"S2_量增突破", "S3_起漲股", "S4_強於大盤"}
+    kept = []
+    skipped = 0
+    for s in sigs:
+        if s["strategy"] not in target_strats:
+            kept.append(s)
+            continue
+        high = float(df_raw["High"].iloc[i])
+        low = float(df_raw["Low"].iloc[i])
+        close = float(df_raw["Close"].iloc[i])
+        if high == low:
+            skipped += 1
+            continue
+        strength = (close - low) / (high - low)
+        if strength >= CLOSE_STRENGTH_MIN:
+            kept.append(s)
+        else:
+            skipped += 1
+    return kept, skipped
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -180,6 +207,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_close_strength = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -232,6 +260,8 @@ def run_portfolio_backtest() -> dict:
             skipped_rs_mount += n_sigs - len(sigs)
             sigs, s2_vol_skipped = apply_s2_vol_filter(sigs, df_raw, i)
             skipped_s2_vol += s2_vol_skipped
+            sigs, cs_skipped = apply_close_strength_filter(sigs, df_raw, i)
+            skipped_close_strength += cs_skipped
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -331,6 +361,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_close_strength": skipped_close_strength,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +412,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_close_strength": skipped_close_strength,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
