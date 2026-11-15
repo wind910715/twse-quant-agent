@@ -49,6 +49,14 @@ S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
 
+STRATEGY_PRIORITY = {
+    "S0_VCP收斂": 0,
+    "S2_量增突破": 1,
+    "S4_強於大盤": 2,
+    "S1_破底翻": 3,
+    "S3_起漲股": 4,
+}
+
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
     "S0_VCP收斂": True,
@@ -266,7 +274,7 @@ def run_portfolio_backtest() -> dict:
 
     # 分配階段：按進場日升序；同日候選按 universe 順序依序填槽
     for entry_date in sorted(cands_by_entry.keys()):
-        day_cands = sorted(cands_by_entry[entry_date], key=lambda c: c["u_idx"])
+        day_cands = sorted(cands_by_entry[entry_date], key=lambda c: (STRATEGY_PRIORITY[c["sig"]["strategy"]], c["u_idx"]))
         for cand in day_cands:
             sid = cand["stock_id"]
             sig = cand["sig"]
