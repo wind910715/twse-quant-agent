@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-11-15 16:39:07",
+  "generated_at": "2026-11-15 19:33:09",
   "version": "v3_strategy_optimization",
   "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股 (目前名單, 非 point-in-time)",
-  "total_trades": 939,
-  "win_rate": 54.1,
-  "rr_ratio": 1.98,
-  "avg_win_pct": 5.93,
-  "avg_loss_pct": -3.0,
-  "cum_return_pct": 2779.46,
+  "total_trades": 941,
+  "win_rate": 54.6,
+  "rr_ratio": 1.96,
+  "avg_win_pct": 5.92,
+  "avg_loss_pct": -3.02,
+  "cum_return_pct": 2994.18,
   "mdd_pct": -11.93,
   "by_strategy": {
     "S0_VCP收斂": {
@@ -16,24 +16,24 @@
       "avg_return_pct": 2.74
     },
     "S1_破底翻": {
-      "trades": 34,
-      "win_rate": 61.8,
-      "avg_return_pct": 2.08
+      "trades": 36,
+      "win_rate": 61.1,
+      "avg_return_pct": 1.93
     },
     "S2_量增突破": {
-      "trades": 703,
-      "win_rate": 53.3,
-      "avg_return_pct": 1.6
+      "trades": 706,
+      "win_rate": 54.1,
+      "avg_return_pct": 1.66
     },
     "S3_起漲股": {
-      "trades": 25,
-      "win_rate": 52.0,
-      "avg_return_pct": 2.27
+      "trades": 24,
+      "win_rate": 50.0,
+      "avg_return_pct": 2.15
     },
     "S4_強於大盤": {
-      "trades": 130,
-      "win_rate": 56.9,
-      "avg_return_pct": 2.57
+      "trades": 128,
+      "win_rate": 57.0,
+      "avg_return_pct": 2.6
     }
   },
   "shadow_by_strategy": {
@@ -48,36 +48,36 @@
       "avg_return_pct": 5.13
     },
     "S2_量增突破": {
-      "trades": 36,
-      "win_rate": 50.0,
-      "avg_return_pct": 2.27
+      "trades": 37,
+      "win_rate": 51.4,
+      "avg_return_pct": 2.26
     },
     "S3_起漲股": {
-      "trades": 34,
-      "win_rate": 47.1,
-      "avg_return_pct": 1.12
+      "trades": 35,
+      "win_rate": 51.4,
+      "avg_return_pct": 1.56
     },
     "S4_強於大盤": {
-      "trades": 39,
-      "win_rate": 59.0,
-      "avg_return_pct": 1.16
+      "trades": 37,
+      "win_rate": 56.8,
+      "avg_return_pct": 0.93
     }
   },
   "period_split": {
     "first_half": {
-      "trades": 469,
-      "win_rate": 50.5,
-      "avg_return_pct": 1.33
+      "trades": 470,
+      "win_rate": 51.5,
+      "avg_return_pct": 1.4
     },
     "second_half": {
-      "trades": 470,
+      "trades": 471,
       "win_rate": 57.7,
       "avg_return_pct": 2.33
     }
   },
   "censored_trades_excluded": 0,
-  "skipped_portfolio_full": 2405,
-  "skipped_stock_busy": 540,
+  "skipped_portfolio_full": 2394,
+  "skipped_stock_busy": 551,
   "max_concurrent_positions": 5,
   "slot_weight_pct": 20.0,
   "chip_filter_applied": false,
