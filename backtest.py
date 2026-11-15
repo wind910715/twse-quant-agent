@@ -48,6 +48,7 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+LOSS_COOLDOWN_DAYS = 15
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -180,7 +181,9 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_cooldown = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
+    last_loss_exit_idx = {}  # sid -> 最近一筆虧損出場交易的 exit_idx（該標的自身日 K 序號）
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
     # 原版逐檔外圈迴圈的漏洞：處理某檔時，尚未處理到的其他檔、進場日較早的部位
@@ -279,6 +282,10 @@ def run_portfolio_backtest() -> dict:
             if len(overlapping) >= MAX_CONCURRENT:
                 skipped_portfolio_full += 1
                 continue
+            last_exit_idx = last_loss_exit_idx.get(sid)
+            if last_exit_idx is not None and 1 <= cand["entry_idx"] - last_exit_idx <= LOSS_COOLDOWN_DAYS:
+                skipped_cooldown += 1
+                continue
 
             result = simulate_exit(df, cand["entry_idx"], cand["trigger_buy"], cand["stop_p"])
             if result["censored"]:
@@ -296,6 +303,10 @@ def run_portfolio_backtest() -> dict:
                 "chip_unverified": True,
             })
             open_positions.append({"stock_id": sid, "entry_date": entry_date, "exit_date": exit_date})
+            if result["net_ret_pct"] < 0.0:
+                last_loss_exit_idx[sid] = result["exit_idx"]
+            else:
+                last_loss_exit_idx.pop(sid, None)
 
             # v3 shadow: 次要策略僅統計, 用同一套隔日進場確認與出場模擬（只對已進場的 primary）
             for extra in cand["sigs"][1:]:
@@ -331,6 +342,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_cooldown": skipped_cooldown,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +393,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_cooldown": skipped_cooldown,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
