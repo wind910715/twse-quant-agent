@@ -48,6 +48,7 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+S4_OPEN_GAP_LO = -0.005
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -180,6 +181,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_s4_gap = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -250,6 +252,11 @@ def run_portfolio_backtest() -> dict:
                 if gap < S2_OPEN_GAP_LO or gap > S2_OPEN_GAP_HI:
                     skipped_s2_open += 1
                     continue
+            if sig["strategy"] == "S4_強於大盤":
+                gap = n_open / signal_close - 1
+                if gap < S4_OPEN_GAP_LO:
+                    skipped_s4_gap += 1
+                    continue
             trigger_buy = round(max(signal_close, n_open * 1.003), 2)
             if n_high < trigger_buy or n_close < n_open * 0.998:
                 continue
@@ -306,6 +313,10 @@ def run_portfolio_backtest() -> dict:
                     e_gap = cand["n_open"] / extra["entry_price"] - 1
                     if e_gap < S2_OPEN_GAP_LO or e_gap > S2_OPEN_GAP_HI:
                         continue
+                if extra["strategy"] == "S4_強於大盤":
+                    e_gap = cand["n_open"] / extra["entry_price"] - 1
+                    if e_gap < S4_OPEN_GAP_LO:
+                        continue
                 e_trigger = round(max(extra["entry_price"], cand["n_open"] * 1.003), 2)
                 if cand["n_high"] < e_trigger or cand["n_close"] < cand["n_open"] * 0.998:
                     continue
@@ -331,6 +342,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_s4_gap": skipped_s4_gap,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +393,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_s4_gap": skipped_s4_gap,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
