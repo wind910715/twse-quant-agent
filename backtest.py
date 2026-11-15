@@ -48,6 +48,7 @@ RS_MOUNT_THRESHOLD = 80.0
 S2_VOL_MULT = 2.5
 S2_OPEN_GAP_LO = -0.01
 S2_OPEN_GAP_HI = 0.05
+RS_TOP15_PERCENTILE = 85.0
 
 # 變體 A — 動能全掛，S1 除外（S0／S2／S3／S4 掛複合>=80；S1 不掛）
 RS_MOUNT = {
@@ -73,6 +74,15 @@ def compute_rs_panels(close_m: pd.DataFrame):
     rs_year = rs_weighted.rank(axis=1, pct=True) * 99
     rs_quarter = rets[63].rank(axis=1, pct=True) * 99
     return rs_year, rs_quarter
+
+
+def compute_rs_top15_thresholds(rs_year, rs_quarter):
+    """V5e：每日全宇宙複合 RS 的 85 百分位門檻（只用訊號日當下已知的截面資料，無前視）。
+    複合面板向量化算法與 rs_composite 逐值規則等價：皆有取平均、缺一取其一、皆缺取 50.0。
+    回傳 pandas Series（index 為日期），於回測前計算一次。
+    """
+    comp = ((rs_year.fillna(rs_quarter) + rs_quarter.fillna(rs_year)) / 2).fillna(50.0)
+    return comp.quantile(RS_TOP15_PERCENTILE / 100.0, axis=1)
 
 
 def rs_composite(rs_year, rs_quarter, signal_date, symbol) -> float:
@@ -132,6 +142,24 @@ def apply_s2_vol_filter(sigs, df_raw, i):
     return kept, s2_vol_skipped
 
 
+def apply_rs_top15_filter(sigs, rs_year, rs_quarter, thresholds, signal_date, symbol):
+    """V5e：宇宙 RS 相對排名 Top 15% 濾網（全策略套用）。
+    訊號日 T，該檔複合 RS >= 當日全宇宙複合 RS 的 85 百分位門檻才保留（邊界含）；
+    若 signal_date 不在 thresholds.index 內則全部擋下。回傳 (kept, skipped)。
+    """
+    if signal_date not in thresholds.index:
+        return [], len(sigs)
+    thr = float(thresholds.at[signal_date])
+    kept = []
+    skipped = 0
+    for s in sigs:
+        if rs_composite(rs_year, rs_quarter, signal_date, symbol) >= thr:
+            kept.append(s)
+        else:
+            skipped += 1
+    return kept, skipped
+
+
 def summarize_rows(rows: list) -> dict:
     if not rows:
         return {"trades": 0, "win_rate": 0.0, "avg_return_pct": 0.0}
@@ -171,6 +199,7 @@ def run_portfolio_backtest() -> dict:
     if close_m.empty:
         raise RuntimeError("V4: RS 收盤價面板為空")
     rs_year, rs_quarter = compute_rs_panels(close_m)
+    rs_top15_thresholds = compute_rs_top15_thresholds(rs_year, rs_quarter)
 
     trades = []
     shadow_trades = []  # v3: 同日同股的次要策略訊號也做影子模擬統計 (不占組合資金), 避免次要訊號被優先序吞掉而看不見表現
@@ -180,6 +209,7 @@ def run_portfolio_backtest() -> dict:
     skipped_rs_mount = 0  # V4 診斷計數：被 RS 掛載擋下的訊號數（不影響交易行為）
     skipped_s2_vol = 0
     skipped_s2_open = 0
+    skipped_rs_top15 = 0
     open_positions = []  # [{stock_id, entry_date, exit_date}]
 
     # ---- 2026-11-14 日曆併發修復（使用者核准併進 live）----
@@ -232,6 +262,8 @@ def run_portfolio_backtest() -> dict:
             skipped_rs_mount += n_sigs - len(sigs)
             sigs, s2_vol_skipped = apply_s2_vol_filter(sigs, df_raw, i)
             skipped_s2_vol += s2_vol_skipped
+            sigs, top15_skipped = apply_rs_top15_filter(sigs, rs_year, rs_quarter, rs_top15_thresholds, dt_idx, t_sym)
+            skipped_rs_top15 += top15_skipped
             if not sigs:
                 continue
             sig = sigs[0]  # 同日同股多策略只取優先序第一個, 不重複曝險
@@ -331,6 +363,7 @@ def run_portfolio_backtest() -> dict:
             "skipped_rs_mount": skipped_rs_mount,
             "skipped_s2_vol": skipped_s2_vol,
             "skipped_s2_open": skipped_s2_open,
+            "skipped_rs_top15": skipped_rs_top15,
             "max_concurrent_positions": MAX_CONCURRENT,
             "slot_weight_pct": SLOT_WEIGHT * 100,
             "chip_filter_applied": False, "universe_point_in_time": False,
@@ -381,6 +414,7 @@ def run_portfolio_backtest() -> dict:
         "skipped_rs_mount": skipped_rs_mount,
         "skipped_s2_vol": skipped_s2_vol,
         "skipped_s2_open": skipped_s2_open,
+        "skipped_rs_top15": skipped_rs_top15,
         "max_concurrent_positions": MAX_CONCURRENT,
         "slot_weight_pct": SLOT_WEIGHT * 100,
         "chip_filter_applied": False,
