@@ -1,39 +1,39 @@
 {
-  "generated_at": "2026-11-15 02:28:04",
+  "generated_at": "2026-11-15 23:38:58",
   "version": "v3_strategy_optimization",
   "universe_scope": "台灣50 + 中型100 + 富櫃50 + 富櫃200 + MSCI成分股 (目前名單, 非 point-in-time)",
-  "total_trades": 715,
-  "win_rate": 59.6,
-  "rr_ratio": 1.87,
-  "avg_win_pct": 6.11,
-  "avg_loss_pct": -3.26,
-  "cum_return_pct": 2499.46,
-  "mdd_pct": -7.4,
+  "total_trades": 430,
+  "win_rate": 59.1,
+  "rr_ratio": 1.82,
+  "avg_win_pct": 5.6,
+  "avg_loss_pct": -3.08,
+  "cum_return_pct": 461.31,
+  "mdd_pct": -6.83,
   "by_strategy": {
     "S0_VCP收斂": {
       "trades": 68,
-      "win_rate": 70.6,
-      "avg_return_pct": 3.25
+      "win_rate": 69.1,
+      "avg_return_pct": 3.13
     },
     "S1_破底翻": {
-      "trades": 115,
-      "win_rate": 53.9,
-      "avg_return_pct": 1.73
+      "trades": 118,
+      "win_rate": 54.2,
+      "avg_return_pct": 1.66
     },
     "S2_量增突破": {
-      "trades": 122,
-      "win_rate": 63.1,
-      "avg_return_pct": 2.23
+      "trades": 128,
+      "win_rate": 63.3,
+      "avg_return_pct": 2.24
     },
     "S3_起漲股": {
-      "trades": 50,
+      "trades": 56,
       "win_rate": 50.0,
-      "avg_return_pct": 1.58
+      "avg_return_pct": 1.39
     },
     "S4_強於大盤": {
-      "trades": 360,
-      "win_rate": 59.4,
-      "avg_return_pct": 2.47
+      "trades": 60,
+      "win_rate": 56.7,
+      "avg_return_pct": 1.8
     }
   },
   "shadow_by_strategy": {
@@ -45,42 +45,43 @@
     "S1_破底翻": {
       "trades": 24,
       "win_rate": 75.0,
-      "avg_return_pct": 4.01
+      "avg_return_pct": 3.99
     },
     "S2_量增突破": {
-      "trades": 21,
-      "win_rate": 90.5,
-      "avg_return_pct": 5.47
+      "trades": 22,
+      "win_rate": 86.4,
+      "avg_return_pct": 4.94
     },
     "S3_起漲股": {
-      "trades": 19,
-      "win_rate": 73.7,
-      "avg_return_pct": 5.44
+      "trades": 18,
+      "win_rate": 72.2,
+      "avg_return_pct": 5.13
     },
     "S4_強於大盤": {
-      "trades": 7,
-      "win_rate": 85.7,
-      "avg_return_pct": 1.98
+      "trades": 2,
+      "win_rate": 100.0,
+      "avg_return_pct": 2.18
     }
   },
   "period_split": {
     "first_half": {
-      "trades": 357,
-      "win_rate": 57.7,
-      "avg_return_pct": 2.38
+      "trades": 215,
+      "win_rate": 55.3,
+      "avg_return_pct": 1.63
     },
     "second_half": {
-      "trades": 358,
-      "win_rate": 61.5,
-      "avg_return_pct": 2.27
+      "trades": 215,
+      "win_rate": 62.8,
+      "avg_return_pct": 2.46
     }
   },
   "censored_trades_excluded": 0,
-  "skipped_portfolio_full": 66,
-  "skipped_stock_busy": 287,
-  "skipped_rs_mount": 9758,
-  "skipped_s2_vol": 3766,
+  "skipped_portfolio_full": 8,
+  "skipped_stock_busy": 29,
+  "skipped_rs_mount": 9748,
+  "skipped_s2_vol": 3749,
   "skipped_s2_open": 36,
+  "skipped_s4_prerun": 1734,
   "max_concurrent_positions": 5,
   "slot_weight_pct": 20.0,
   "chip_filter_applied": false,
