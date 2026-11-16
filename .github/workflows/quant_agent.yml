@@ -140,6 +140,14 @@ jobs:
           git add latest_report.json active_positions.json latest_backtest.json universe_cache.json trade_events.jsonl
           if ! git diff --staged --quiet; then
             git commit -m "Sync quant state $(date +'%Y-%m-%d %H:%M')"
-            git pull --rebase --autostash origin main
+            git pull --rebase --autostash origin "$(git rev-parse --abbrev-ref HEAD)"
             git push origin HEAD
           fi
+
+      - name: 4b. 上傳回測結果 latest_backtest.json 為 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-result
+          path: latest_backtest.json
+          if-no-files-found: warn
