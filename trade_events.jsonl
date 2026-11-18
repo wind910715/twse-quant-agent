@@ -1,3 +1,4 @@
 {"date": "2026-11-02", "time": "09:53:17", "stock_id": "2603", "stock_name": "長榮", "strategy": "S2_量增突破", "event": "ENTRY", "price": 273.5, "shares": 128, "remaining_shares": 128, "entry_price": 273.5, "gain_pct": null}
 {"date": "2026-11-04", "time": "09:50:45", "stock_id": "2603", "stock_name": "長榮", "strategy": "S2_量增突破", "event": "STOPPED_OUT", "price": 261.5, "shares": 128, "remaining_shares": 0, "entry_price": 273.5, "gain_pct": -4.39}
 {"date": "2026-11-16", "time": "09:06:21", "stock_id": "2891", "stock_name": "中信金", "strategy": "S2_量增突破", "event": "ENTRY", "price": 80.1, "shares": 444, "remaining_shares": 444, "entry_price": 80.1, "gain_pct": null}
+{"date": "2026-11-18", "time": "16:10:56", "stock_id": "2891", "stock_name": "中信金", "strategy": "S2_量增突破", "event": "STOPPED_OUT", "price": 73.4, "shares": 444, "remaining_shares": 0, "entry_price": 80.1, "gain_pct": -8.36}

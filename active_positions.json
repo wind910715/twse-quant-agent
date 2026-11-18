@@ -36,7 +36,7 @@
     "ma10": 74.91,
     "ma20": 74.63,
     "suggested_shares": 444,
-    "remaining_shares": 444,
+    "remaining_shares": 0,
     "capital_used": 34942,
     "capital_pct": 34.9,
     "max_loss_twd": 1049,
@@ -47,7 +47,7 @@
     "tp1_alerted": false,
     "tp2_alerted": false,
     "tp3_alerted": false,
-    "status": "HOLDING",
+    "status": "STOPPED_OUT",
     "actual_entry_price": 80.1,
     "entry_time": "2026-11-16 09:06:21"
   }
