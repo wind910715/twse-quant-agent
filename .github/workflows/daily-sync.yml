@@ -1,0 +1,38 @@
+name: Daily TWSE & TPEx Full Market Sync
+
+on:
+  schedule:
+    # 週一至週五 台灣時間 15:40 (UTC 07:40) 盤後自動更新（避開 15:00-15:30 三大法人發布空窗）
+    - cron: '40 7 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run full market sync (with baseline CSV seed if DB is new)
+        run: |
+          if [ ! -f tw_full_market.db ] && [ -f tw_stocks_database_43_20261125.csv ]; then
+            python3 tw_full_market_sync.py --seed-csv tw_stocks_database_43_20261125.csv
+          else
+            python3 tw_full_market_sync.py
+          fi
+
+      - name: Commit updated full-market database
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tw_full_market.db tw_full_market_db.json tw_full_market_db.csv
+          git diff --staged --quiet || git commit -m "chore: update TWSE+TPEx full market data"
+          git push
